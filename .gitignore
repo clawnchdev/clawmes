@@ -1,0 +1,76 @@
+# Project artifacts (private)
+PRD.md
+gitignored-docs/
+.plans/
+.notes/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+develop-eggs/
+parts/
+sdist/
+wheels/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checkers
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node bridges (built artifacts)
+clawmes/bridges/sources/wc/node_modules/
+clawmes/bridges/sources/wc/dist/
+clawmes/bridges/sources/sa/node_modules/
+clawmes/bridges/sources/sa/dist/
+
+# Local state (when developing against a real Hermes)
+.hermes/
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+keystore.bin
+
+# Logs
+*.log
+logs/
