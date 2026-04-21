@@ -15,7 +15,7 @@ the per-tool ``details`` payload).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,8 @@ class Action:
 class If:
     kind: Literal["if"] = field(default="if", init=False)
     condition: str = ""  # e.g. "${steps.2.details.price} > 2000"
-    then: list["Step"] = field(default_factory=list)
-    else_: list["Step"] = field(default_factory=list)
+    then: list[Step] = field(default_factory=list)
+    else_: list[Step] = field(default_factory=list)
     label: str = ""
 
 
@@ -41,7 +41,7 @@ class If:
 class Loop:
     kind: Literal["loop"] = field(default="loop", init=False)
     iterations: int = 1
-    body: list["Step"] = field(default_factory=list)
+    body: list[Step] = field(default_factory=list)
     every: str | None = None  # cron-or-interval; if set, scheduler waits between iters
     until: str | None = None  # boolean expr; loop early-terminates when true
     label: str = ""
@@ -50,12 +50,12 @@ class Loop:
 @dataclass(frozen=True)
 class Parallel:
     kind: Literal["parallel"] = field(default="parallel", init=False)
-    branches: list[list["Step"]] = field(default_factory=list)
+    branches: list[list[Step]] = field(default_factory=list)
     max_concurrency: int = 4
     label: str = ""
 
 
-Step = Union[Action, If, Loop, Parallel]
+Step = Action | If | Loop | Parallel
 
 
 @dataclass(frozen=True)

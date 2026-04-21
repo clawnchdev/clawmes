@@ -13,7 +13,7 @@ registers a single recurring cron job at install that calls into here.
 from __future__ import annotations
 
 import threading
-from typing import Iterator
+from collections.abc import Iterator
 
 from clawmes.lib.logger import logger_for
 from clawmes.services._base import Service

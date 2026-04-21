@@ -55,6 +55,4 @@ class WalletConnectMode(WalletMode):
         )
 
     def sign_typed_data_v4(self, typed_data: dict[str, Any]) -> str:
-        raise NotImplementedError(
-            "WalletConnect bridge not wired in this milestone."
-        )
+        raise NotImplementedError("WalletConnect bridge not wired in this milestone.")

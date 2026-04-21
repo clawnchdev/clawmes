@@ -23,10 +23,11 @@ __all__ = ["WRITE_TOOL_NAMES", "read_tool", "register_all", "write_tool"]
 def register_all(ctx) -> None:
     """Register every clawmes tool with the Hermes plugin context.
 
-    Stub at this milestone — individual tool modules are added in subsequent
-    commits and imported here as they land. Order matters: registration
-    order = order in the LLM-visible tool catalog. Most-used tools first.
+    Order matters: registration order = order in the LLM-visible tool
+    catalog. Most-used tools first. The full 48-tool roster comes online
+    across v0.1.0 → v0.5.0; this list grows as each tool module lands.
     """
-    # TODO(v0.1.0): import tool modules and call ``mod.register(ctx)`` in
-    # the order documented in PRD §8.12.
-    _ = ctx
+    from clawmes.tools import transfer
+
+    for mod in (transfer,):
+        mod.register(ctx)

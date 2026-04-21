@@ -26,7 +26,6 @@ from clawmes._version import __version__
 from clawmes.lib.paths import bridges_dir, hermes_home
 from clawmes.services.wallet import get_wallet_state
 
-
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
@@ -38,7 +37,9 @@ def run(args: argparse.Namespace) -> int:
     checks = _gather_checks()
     bad = 0
     for label, status, detail in checks:
-        marker = {"ok": f"{GREEN}✓{RESET}", "warn": f"{YELLOW}⚠{RESET}", "fail": f"{RED}✗{RESET}"}[status]
+        marker = {"ok": f"{GREEN}✓{RESET}", "warn": f"{YELLOW}⚠{RESET}", "fail": f"{RED}✗{RESET}"}[
+            status
+        ]
         print(f"{marker} {label:<35} {detail}")
         if status == "fail":
             bad += 1
@@ -52,15 +53,11 @@ def run_status(args: argparse.Namespace) -> int:
     """One-line health check, optionally JSON."""
     checks = _gather_checks()
     statuses = [c[1] for c in checks]
-    overall = (
-        "fail" if "fail" in statuses
-        else "warn" if "warn" in statuses
-        else "ok"
-    )
+    overall = "fail" if "fail" in statuses else "warn" if "warn" in statuses else "ok"
     payload = {
         "overall": overall,
         "version": __version__,
-        "checks": [{"label": l, "status": s, "detail": d} for l, s, d in checks],
+        "checks": [{"label": label, "status": s, "detail": d} for label, s, d in checks],
     }
     if getattr(args, "json", False):
         print(json.dumps(payload, indent=2))
@@ -97,11 +94,13 @@ def _gather_checks() -> list[tuple[str, str, str]]:
     # Wallet state
     state = get_wallet_state()
     if state.connected:
-        out.append((
-            "Wallet connected",
-            "ok",
-            f"{state.mode} / {state.chain_name} / {state.address}",
-        ))
+        out.append(
+            (
+                "Wallet connected",
+                "ok",
+                f"{state.mode} / {state.chain_name} / {state.address}",
+            )
+        )
     else:
         out.append(("Wallet connected", "warn", "no wallet — run /connect"))
 
@@ -118,10 +117,12 @@ def _gather_checks() -> list[tuple[str, str, str]]:
     if wc.exists() and sa.exists():
         out.append((bridges_label, "ok", "wc + sa npm-installed"))
     else:
-        out.append((
-            bridges_label,
-            "warn",
-            "not yet installed — first plugin start will run npm ci",
-        ))
+        out.append(
+            (
+                bridges_label,
+                "warn",
+                "not yet installed — first plugin start will run npm ci",
+            )
+        )
 
     return out

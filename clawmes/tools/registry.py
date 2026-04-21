@@ -33,7 +33,8 @@ non-disruptive change.
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from clawmes.lib.params import ParamError
 from clawmes.lib.tool_result import error_result

@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from clawmes.lib.params import read_str
-from clawmes.lib.tool_result import error_result, json_result
+from clawmes.lib.tool_result import error_result
 from clawmes.services.wallet import get_wallet_state
 from clawmes.tools.registry import register_with_ctx, write_tool
 

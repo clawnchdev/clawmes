@@ -21,7 +21,7 @@ from clawmes.wallet.state import WalletState
 _log = logger_for("wallet.local_key")
 
 KEYRING_SERVICE = "clawmes"
-SCRYPT_N = 2 ** 17
+SCRYPT_N = 2**17
 SCRYPT_R = 8
 SCRYPT_P = 1
 DKLEN = 32  # bytes — AES-256 key

@@ -23,7 +23,6 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-
 _DEFAULT_TTL_SECONDS = 600  # 10 min — the LLM has plenty of time to relay
 
 
@@ -75,9 +74,7 @@ class ConfirmStore:
         # Tool name + frozen args (excluding the nonce field itself)
         tool = getattr(action_ctx, "tool_name", str(action_ctx))
         args = getattr(action_ctx, "args", {}) or {}
-        rest = sorted(
-            (k, repr(v)) for k, v in args.items() if k != "policyConfirmationNonce"
-        )
+        rest = sorted((k, repr(v)) for k, v in args.items() if k != "policyConfirmationNonce")
         return f"{tool}::{rest}"
 
 

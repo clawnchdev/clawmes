@@ -83,9 +83,7 @@ def _check_steps(steps: list[Step], prefix: str) -> None:
             _check_steps(step.else_, path + ".else.")
         elif isinstance(step, Loop):
             if step.iterations <= 0 and step.until is None:
-                raise ValidationError(
-                    f"{path}: Loop has no iteration cap and no until clause"
-                )
+                raise ValidationError(f"{path}: Loop has no iteration cap and no until clause")
             _check_steps(step.body, path + ".body.")
         elif isinstance(step, Parallel):
             if not step.branches:

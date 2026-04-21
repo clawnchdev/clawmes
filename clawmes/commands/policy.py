@@ -38,10 +38,7 @@ async def handle_dangermode(raw_args: str) -> str:
 
 
 async def handle_audit(raw_args: str) -> str:
-    return (
-        "Risk audit (allowances + delegations + signers) not yet "
-        "implemented at this milestone."
-    )
+    return "Risk audit (allowances + delegations + signers) not yet implemented at this milestone."
 
 
 def register(ctx) -> None:

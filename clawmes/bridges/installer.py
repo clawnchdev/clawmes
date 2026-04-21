@@ -75,7 +75,11 @@ def _ensure_one(name: str, *, force: bool) -> Path | None:
 
     expected_hash = _hash_files(pj, pl)
     marker = target / ".installed-hash"
-    if not force and marker.exists() and marker.read_text(encoding="utf-8").strip() == expected_hash:
+    if (
+        not force
+        and marker.exists()
+        and marker.read_text(encoding="utf-8").strip() == expected_hash
+    ):
         _log.debug("bridge %s already installed (hash %s)", name, expected_hash[:8])
         return target / "dist" / "index.mjs"
 

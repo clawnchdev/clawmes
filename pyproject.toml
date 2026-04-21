@@ -31,7 +31,12 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "hermes-agent>=2026.4.23,<2027.0.0",
+    # Note: hermes-agent is intentionally NOT listed here. Hermes is not
+    # published to PyPI — users install it via the upstream installer
+    # (curl https://raw.githubusercontent.com/NousResearch/hermes-agent/
+    # main/scripts/install.sh | bash) or `pip install` from a git URL.
+    # Clawmes' tests use a FakePluginContext and don't need the real
+    # Hermes runtime; production deployments install Hermes separately.
     "web3>=7.0.0",
     "eth-account>=0.13.0",
     "eth-utils>=4.0.0",

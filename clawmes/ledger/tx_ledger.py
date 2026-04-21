@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -113,7 +113,7 @@ def record_tx(
 ) -> None:
     """Append a record. Convenience wrapper around ``get_ledger().append``."""
     record = TxRecord(
-        ts=datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+        ts=datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
         session_id=session_id,
         user_id=user_id,
         tool_name=tool_name,

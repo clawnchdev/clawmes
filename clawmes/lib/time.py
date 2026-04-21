@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 _HUMAN_RE = re.compile(
     r"^\s*every\s+(\d+)\s*(s|m|h|d)\s*$",
@@ -46,7 +46,7 @@ class Schedule:
 
     def next_after(self, now: datetime | None = None) -> datetime:
         """Return the next fire time strictly after ``now`` (default: UTC now)."""
-        now = now or datetime.now(tz=timezone.utc)
+        now = now or datetime.now(tz=UTC)
         if self.kind == "interval":
             return now + timedelta(seconds=self.seconds)
         if self.kind == "cron":

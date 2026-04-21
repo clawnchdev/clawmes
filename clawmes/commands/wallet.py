@@ -46,10 +46,7 @@ async def handle_mode(raw_args: str) -> str:
         state = get_wallet_state()
         return f"Current wallet mode: {state.mode or '(not configured)'}"
     if requested not in ("walletconnect", "local", "bankr"):
-        return (
-            f"Unknown mode {requested!r}. "
-            "Choose one of: walletconnect, local, bankr."
-        )
+        return f"Unknown mode {requested!r}. Choose one of: walletconnect, local, bankr."
     return (
         f"Switching to {requested!r} mode is not yet implemented at this "
         "milestone. Run `hermes clawmes init` to reconfigure."

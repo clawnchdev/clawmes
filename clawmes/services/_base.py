@@ -43,11 +43,12 @@ class Service(ABC):
         """
         return {"id": self.id, "status": "unknown"}
 
-    def tick(self) -> None:
+    def tick(self) -> None:  # noqa: B027 — intentionally a no-op default
         """Optional periodic callback. Default: no-op.
 
         Services that opt into the tick loop should set ``ticking = True``
-        on the class so the registry knows to call them.
+        on the class so the registry knows to call them. Not abstract —
+        subclasses only override when they want to participate.
         """
 
     #: Set to ``True`` on subclasses that want ``tick()`` invoked on the

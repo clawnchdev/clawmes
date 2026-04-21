@@ -91,7 +91,7 @@ class BridgeProcess:
             f"BridgeProcess.call({method!r}) is stubbed at this milestone",
         )
 
-    def notifications(self) -> "Queue[Notification]":
+    def notifications(self) -> Queue[Notification]:
         return self._notifications
 
     def _enqueue_notification(self, raw_line: str) -> None:
@@ -100,6 +100,8 @@ class BridgeProcess:
             if "id" in payload:
                 # Response, not notification
                 return
-            self._notifications.put(Notification(method=payload["method"], params=payload.get("params", {})))
+            self._notifications.put(
+                Notification(method=payload["method"], params=payload.get("params", {}))
+            )
         except (json.JSONDecodeError, KeyError) as exc:
             _log.warning("bad notification on %s: %s", self.name, exc)
