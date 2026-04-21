@@ -15,7 +15,15 @@ from __future__ import annotations
 import atexit
 import signal
 
-from clawmes import persona, services, tools
+from clawmes import (
+    cli,
+    commands,
+    hooks,
+    persona,
+    services,
+    skills,
+    tools,
+)
 from clawmes._version import __version__
 from clawmes.lib.logger import logger_for
 
@@ -52,9 +60,14 @@ def register(ctx) -> None:
         # 1. First-run setup
         persona.ensure_soul_md()
 
-        # 2. Register surface (each subsystem's register_all is a stub
-        # until later milestones; safe to call now).
+        # 2. Register surface — each subsystem's register_all is
+        # idempotent and safe to call regardless of which other
+        # subsystems are wired.
         tools.register_all(ctx)
+        commands.register_all(ctx)
+        hooks.register_all(ctx)
+        skills.register_all(ctx)
+        cli.register_all(ctx)
 
         # 3. Background services
         services.start_all()
