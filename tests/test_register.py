@@ -19,9 +19,10 @@ def test_register_does_not_raise(mock_ctx) -> None:
 
 def test_register_wires_at_least_one_tool(mock_ctx) -> None:
     clawmes.register(mock_ctx)
-    # At minimum ``transfer`` is registered.
+    # At minimum ``transfer`` and ``defi_price`` are registered.
     names = {t["name"] for t in mock_ctx.tools}
     assert "transfer" in names
+    assert "defi_price" in names
 
 
 def test_register_wires_at_least_one_command(mock_ctx) -> None:
