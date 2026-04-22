@@ -23,12 +23,34 @@ __all__ = ["Service", "registry", "start_all", "stop_all", "tick_all"]
 def start_all() -> None:
     """Start every clawmes service in topological order.
 
-    Stub at this milestone — individual service modules are added in
-    subsequent commits and registered here as they land. The plugin still
-    boots cleanly with no services running; tools / commands degrade
-    gracefully.
+    Order rules (per PRD §10.16):
+
+      1. Foundational primitives first — RPC, ENS, registries.
+      2. Wallet next — depends on credentials being readable.
+      3. Market data next — gets exercised by tools and triggers.
+      4. DEX/lending/yield services after.
+      5. Background daemons last — scheduler, heartbeat, monitors.
+
+    Each ``factory()`` is the singleton accessor for one service. We call
+    it to materialize the instance, register it, then ``start()``. New
+    services land here as they're built; tools that need an absent
+    service degrade with a clear ``not_implemented`` error rather than
+    crashing.
     """
-    _log.info("clawmes.services.start_all() — no services registered yet")
+    from clawmes.services.coingecko import get_coingecko_service
+    from clawmes.services.price import get_price_service
+
+    factories = [
+        get_coingecko_service,  # CoinGecko HTTP client (price backend)
+        get_price_service,  # Price router (depends on coingecko)
+    ]
+    for factory in factories:
+        svc = factory()
+        registry.register(svc)
+        try:
+            svc.start()
+        except Exception:
+            _log.exception("service %s start raised; continuing", svc.id)
 
 
 def stop_all() -> None:
