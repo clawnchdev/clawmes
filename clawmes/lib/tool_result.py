@@ -47,7 +47,8 @@ def json_result(data: dict[str, Any], *, summary: str | None = None) -> str:
         {
             "content": [{"type": "text", "text": text}],
             "details": data,
-        }
+        },
+        default=str,
     )
 
 
