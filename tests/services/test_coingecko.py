@@ -152,6 +152,22 @@ class TestGetPrices:
         out = svc.get_prices(["ethereum"], "usd")
         assert out == {}
 
+    def test_per_token_non_dict_skipped(self, fake_http):
+        """Cover line 133 — `continue` when one token's value isn't a dict.
+
+        Real-world scenario: CoinGecko occasionally returns a string or
+        null for a token that's been delisted mid-request.
+        """
+        fake_http.response = {
+            "ethereum": {"usd": 3500},
+            "delisted": "not-a-dict-anymore",
+        }
+        svc = CoinGeckoService()
+        svc.start()
+        out = svc.get_prices(["ethereum", "delisted"], "usd")
+        # ethereum present, delisted skipped silently
+        assert out == {"ethereum": 3500.0}
+
 
 class TestCache:
     def test_repeat_call_does_not_hit_network(self, fake_http):

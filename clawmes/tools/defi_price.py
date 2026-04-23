@@ -67,15 +67,16 @@ def defi_price(args: dict[str, Any], **kwargs: Any) -> str:
 
     if action == "quote":
         return _handle_quote(args, vs_currency)
-    if action == "multi":
-        return _handle_multi(args, vs_currency)
-    return error_result(f"Unknown action: {action!r}", code="invalid_action")
+    # action == "multi" — read_enum guarantees one of {quote, multi}
+    return _handle_multi(args, vs_currency)
 
 
 def _handle_quote(args: dict[str, Any], vs_currency: str) -> str:
+    # read_str(required=True) raises ParamError if missing — caught by the
+    # @read_tool decorator and converted to a param_error envelope. We
+    # therefore know symbol is a non-empty string here.
     symbol = read_str(args, "symbol", required=True)
-    if symbol is None:
-        return error_result("Missing required parameter: 'symbol'", code="param_error")
+    assert symbol is not None  # narrow for type checkers
 
     price = get_price_service().get_price(symbol, vs_currency)
     if price is None:

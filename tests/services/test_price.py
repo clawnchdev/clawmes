@@ -121,3 +121,11 @@ class TestSingleton:
         a = price_module.get_price_service()
         b = price_module.get_price_service()
         assert a is b
+
+
+class TestLifecycle:
+    def test_stop(self):
+        # Cover line 71 — stop() is a no-op
+        svc = PriceService()
+        svc.start()
+        svc.stop()

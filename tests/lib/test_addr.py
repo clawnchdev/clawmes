@@ -85,6 +85,11 @@ class TestZeroAndDead:
         assert is_dead_address("0x" + "0" * 36 + "DEAD")
         assert is_dead_address("0x" + "0" * 36 + "dead")
 
+    def test_is_dead_address_rejects_non_hex(self):
+        # Cover line 39 — is_hex_address False branch returns False early
+        assert is_dead_address("not-an-address") is False
+        assert is_dead_address("") is False
+
 
 class TestShort:
     def test_default(self):
@@ -107,3 +112,77 @@ class TestNeedsEnsResolution:
     def test_no(self):
         assert not needs_ens_resolution("0x" + "a" * 40)
         assert not needs_ens_resolution("not-anything")
+
+
+class TestToChecksum:
+    def test_with_eth_utils(self):
+        # Valid hex address — should return checksummed (or at least
+        # accept what eth_utils gives us)
+        from clawmes.lib.addr import to_checksum
+
+        addr = "0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359"
+        result = to_checksum(addr)
+        assert result.lower() == addr.lower()
+
+    def test_no_eth_utils_fallback(self, monkeypatch):
+        """Cover the ``except ImportError`` branch when eth_utils is missing."""
+        import sys
+
+        from clawmes.lib import addr as addr_mod
+
+        # Force `from eth_utils import to_checksum_address` to fail
+        real_import = (
+            __builtins__["__import__"]
+            if isinstance(__builtins__, dict)
+            else __builtins__.__import__
+        )
+
+        def fake_import(name, *args, **kwargs):
+            if name == "eth_utils":
+                raise ImportError("simulated")
+            return real_import(name, *args, **kwargs)
+
+        if isinstance(__builtins__, dict):
+            monkeypatch.setitem(__builtins__, "__import__", fake_import)
+        else:
+            monkeypatch.setattr(__builtins__, "__import__", fake_import)
+        monkeypatch.delitem(sys.modules, "eth_utils", raising=False)
+
+        # Valid hex → fallback returns lowercase
+        addr = "0xABCDEF" + "0" * 34
+        assert addr_mod.to_checksum(addr) == addr.lower()
+
+    def test_no_eth_utils_invalid_address(self, monkeypatch):
+        """Fallback raises ValueError on a non-hex input."""
+        import sys
+
+        from clawmes.lib import addr as addr_mod
+
+        real_import = (
+            __builtins__["__import__"]
+            if isinstance(__builtins__, dict)
+            else __builtins__.__import__
+        )
+
+        def fake_import(name, *args, **kwargs):
+            if name == "eth_utils":
+                raise ImportError("simulated")
+            return real_import(name, *args, **kwargs)
+
+        if isinstance(__builtins__, dict):
+            monkeypatch.setitem(__builtins__, "__import__", fake_import)
+        else:
+            monkeypatch.setattr(__builtins__, "__import__", fake_import)
+        monkeypatch.delitem(sys.modules, "eth_utils", raising=False)
+
+        with pytest.raises(ValueError, match="Not a hex address"):
+            addr_mod.to_checksum("not-an-address")
+
+
+class TestZeroAddressEdgeCases:
+    def test_is_zero_address_with_valid_hex_non_zero(self):
+        # Cover line 39 — is_hex_address True branch + is_zero_address False
+        assert not is_zero_address("0x" + "a" * 40)
+
+
+import pytest  # noqa: E402  (used by TestToChecksum.test_no_eth_utils_invalid_address)

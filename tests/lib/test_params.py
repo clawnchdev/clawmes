@@ -33,6 +33,10 @@ class TestReadStr:
     def test_coerces_non_string(self):
         assert read_str({"a": 42}, "a") == "42"
 
+    def test_empty_optional_returns_none(self):
+        # Cover line 40 — empty string with required=False
+        assert read_str({"a": ""}, "a") is None
+
 
 class TestReadInt:
     def test_int_passthrough(self):
@@ -57,6 +61,16 @@ class TestReadInt:
         # "3.14" is not a valid int — should fail
         with pytest.raises(ParamError):
             read_int({"a": "3.14"}, "a")
+
+    def test_empty_string_optional_returns_none(self):
+        assert read_int({"a": ""}, "a") is None
+
+    def test_missing_optional_returns_none(self):
+        assert read_int({}, "a") is None
+
+    def test_empty_string_required_raises(self):
+        with pytest.raises(ParamError):
+            read_int({"a": ""}, "a", required=True)
 
 
 class TestReadFloat:

@@ -132,6 +132,38 @@ class TestSkippedRecords:
         )
         assert get_ledger().iter_records() == []
 
+    def test_none_result_not_recorded(self):
+        # No exception, but result is None — _parse_result returns None
+        callback(
+            tool_name="transfer",
+            args={"to": "alice.eth"},
+            result=None,
+            session_id="s",
+            user_id="u",
+        )
+        assert get_ledger().iter_records() == []
+
+    def test_empty_string_result_not_recorded(self):
+        callback(
+            tool_name="transfer",
+            args={"to": "alice.eth"},
+            result="",
+            session_id="s",
+            user_id="u",
+        )
+        assert get_ledger().iter_records() == []
+
+    def test_non_dict_result_not_recorded(self):
+        # Valid JSON, but not a dict (parses to list / string / number)
+        callback(
+            tool_name="transfer",
+            args={"to": "alice.eth"},
+            result='["this", "is", "a", "list"]',
+            session_id="s",
+            user_id="u",
+        )
+        assert get_ledger().iter_records() == []
+
     def test_text_only_result_records_with_no_details(self):
         # text_result has no `details` key; ledger should still append
         # using the args, just with tx_hash/chain_id None.
@@ -151,11 +183,13 @@ class TestSkippedRecords:
 class TestRobustness:
     def test_ledger_disk_failure_does_not_propagate(self, monkeypatch):
         """If ledger.append blows up, the hook must swallow it."""
+        from clawmes.hooks import after_tool_call as hook_module
 
         def boom(*a, **kw):
             raise OSError("disk full")
 
-        monkeypatch.setattr(ledger_module, "record_tx", boom)
+        # Patch the reference cached at import time inside the hook module
+        monkeypatch.setattr(hook_module, "record_tx", boom)
         # Must not raise
         callback(
             tool_name="transfer",

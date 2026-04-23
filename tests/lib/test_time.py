@@ -89,6 +89,53 @@ class TestNextAfter:
         with pytest.raises(ValueError, match="Unknown schedule kind"):
             s.next_after(datetime.now(tz=UTC))
 
+    def test_cron_with_croniter_available(self, monkeypatch):
+        """Cover the cron branch when croniter is importable."""
+        import sys
+        import types
+
+        class FakeCroniter:
+            def __init__(self, expr, base):
+                self._next = base + timedelta(hours=1)
+
+            def get_next(self, ret_type):
+                return self._next
+
+        fake_mod = types.ModuleType("croniter")
+        fake_mod.croniter = FakeCroniter
+        monkeypatch.setitem(sys.modules, "croniter", fake_mod)
+
+        s = Schedule(kind="cron", cron_expr="0 9 * * *")
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        result = s.next_after(now)
+        assert result == now + timedelta(hours=1)
+
+    def test_cron_without_croniter_raises(self, monkeypatch):
+        """Cover the ImportError branch."""
+        import sys
+
+        monkeypatch.delitem(sys.modules, "croniter", raising=False)
+
+        real_import = (
+            __builtins__["__import__"]
+            if isinstance(__builtins__, dict)
+            else __builtins__.__import__
+        )
+
+        def fake_import(name, *a, **kw):
+            if name == "croniter":
+                raise ImportError("simulated")
+            return real_import(name, *a, **kw)
+
+        if isinstance(__builtins__, dict):
+            monkeypatch.setitem(__builtins__, "__import__", fake_import)
+        else:
+            monkeypatch.setattr(__builtins__, "__import__", fake_import)
+
+        s = Schedule(kind="cron", cron_expr="0 9 * * *")
+        with pytest.raises(RuntimeError, match="croniter"):
+            s.next_after(datetime.now(tz=UTC))
+
 
 class TestHumanizeSeconds:
     @pytest.mark.parametrize(

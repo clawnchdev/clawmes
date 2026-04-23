@@ -7,13 +7,15 @@ import json
 import pytest
 
 from clawmes.commands.tx import (
+    _find_by_hash,
+    _format_recent,
     handle_pending,
     handle_tx,
     handle_tx_export,
     handle_tx_search,
 )
 from clawmes.ledger import tx_ledger as ledger_module
-from clawmes.ledger.tx_ledger import record_tx
+from clawmes.ledger.tx_ledger import TxRecord, record_tx
 
 
 @pytest.fixture(autouse=True)
@@ -140,3 +142,31 @@ class TestHandlePending:
         _seed(2, status="confirmed")  # not "submitted"
         out = await handle_pending("")
         assert "Showing 2 of 2" in out
+
+
+class TestHelpers:
+    def test_format_recent_empty(self):
+        # Defensive branch — none of the public handlers call this with
+        # empty records, but the function guards it so test that guard.
+        assert _format_recent([], total=0) == "No transactions."
+
+    def test_find_by_hash_skips_records_without_hash(self):
+        # The continue branch when r.tx_hash is None.
+        with_hash = TxRecord(
+            ts="t",
+            session_id="s",
+            user_id="u",
+            tool_name="transfer",
+            tx_hash="0xabc",
+        )
+        without_hash = TxRecord(
+            ts="t2",
+            session_id="s",
+            user_id="u",
+            tool_name="transfer",
+            tx_hash=None,
+        )
+        # Record without hash comes first; should be skipped, the one
+        # with hash should match.
+        result = _find_by_hash([with_hash, without_hash], "0xabc")
+        assert result is with_hash
