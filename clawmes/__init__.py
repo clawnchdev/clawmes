@@ -54,32 +54,51 @@ def register(ctx) -> None:
     never crashes Hermes' boot — the plugin manager will mark the plugin
     disabled and surface the error in ``hermes plugins list``.
     """
+    _log.info("clawmes %s registering with Hermes", __version__)
+
+    # 1. First-run setup. If this fails we still continue to surface
+    # registration — a missing SOUL.md is a degraded state, not a hard
+    # failure.
+    _safe("persona.ensure_soul_md", persona.ensure_soul_md)
+
+    # 2. Register surface — each subsystem is isolated so a buggy
+    # commands module can't take down tools, hooks, skills, or the CLI.
+    # Hermes shows a partial-feature plugin instead of a fully-disabled
+    # one.
+    _safe("tools.register_all", tools.register_all, ctx)
+    _safe("commands.register_all", commands.register_all, ctx)
+    _safe("hooks.register_all", hooks.register_all, ctx)
+    _safe("skills.register_all", skills.register_all, ctx)
+    _safe("cli.register_all", cli.register_all, ctx)
+
+    # 3. Background services. start_all itself wraps each service in
+    # try/except, so partial failure here means partial feature loss
+    # rather than total plugin failure.
+    _safe("services.start_all", services.start_all)
+
+    # 4. Cleanup
     try:
-        _log.info("clawmes %s registering with Hermes", __version__)
-
-        # 1. First-run setup
-        persona.ensure_soul_md()
-
-        # 2. Register surface — each subsystem's register_all is
-        # idempotent and safe to call regardless of which other
-        # subsystems are wired.
-        tools.register_all(ctx)
-        commands.register_all(ctx)
-        hooks.register_all(ctx)
-        skills.register_all(ctx)
-        cli.register_all(ctx)
-
-        # 3. Background services
-        services.start_all()
-
-        # 4. Cleanup
         atexit.register(services.stop_all)
         _install_signal_handlers()
-
-        _log.info("clawmes register() complete")
     except Exception:
-        _log.exception("clawmes register() failed; plugin will be disabled")
-        raise
+        _log.exception("failed to install cleanup hooks")
+
+    _log.info("clawmes register() complete")
+
+
+def _safe(label: str, fn, *args, **kwargs) -> None:
+    """Run ``fn(*args, **kwargs)`` and log any exception without re-raising.
+
+    Used to isolate register-time failures: a broken module in one
+    subsystem (e.g. ``commands``) shouldn't disable every other
+    subsystem. If something fails here the user gets a partially-
+    functional plugin and a clear log entry instead of a fully-
+    disabled plugin and a stack trace in ``hermes plugins list``.
+    """
+    try:
+        fn(*args, **kwargs)
+    except Exception:
+        _log.exception("clawmes register: %s failed; continuing", label)
 
 
 def _install_signal_handlers() -> None:

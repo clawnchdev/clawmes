@@ -72,7 +72,70 @@ def test_double_register_is_idempotent(mock_ctx) -> None:
     assert len(mock_ctx.tools) >= initial_tool_count
 
 
+def test_register_starts_core_services(mock_ctx) -> None:
+    """start_all should register wallet, coingecko, price, scheduler."""
+    from clawmes.services.registry import registry
+
+    clawmes.register(mock_ctx)
+    ids = {svc.id for svc in registry.iter_services()}
+    assert "clawmes.wallet" in ids
+    assert "clawmes.coingecko" in ids
+    assert "clawmes.price" in ids
+    assert "clawmes.plan_scheduler" in ids
+
+
+def test_register_isolates_subsystem_failures(mock_ctx, monkeypatch) -> None:
+    """A buggy subsystem must not take down the others.
+
+    Patches ``commands.register_all`` to raise. After register(), the
+    other subsystems should still have wired (tools, hooks, skills,
+    CLI). No exception should escape.
+    """
+    from clawmes import commands
+
+    def boom(ctx):  # noqa: ARG001
+        raise RuntimeError("simulated commands failure")
+
+    monkeypatch.setattr(commands, "register_all", boom)
+
+    # Must NOT raise
+    clawmes.register(mock_ctx)
+
+    # Other subsystems still landed
+    tool_names = {t["name"] for t in mock_ctx.tools}
+    assert "transfer" in tool_names
+    assert "defi_price" in tool_names
+
+    cli_names = {c["name"] for c in mock_ctx.cli_commands}
+    assert "clawmes" in cli_names
+
+    skill_names = {s["name"] for s in mock_ctx.skills}
+    assert "transfer" in skill_names
+
+    # commands subsystem broke → no commands were wired
+    assert mock_ctx.commands == []
+
+
+def test_register_isolates_persona_failure(mock_ctx, monkeypatch) -> None:
+    """A SOUL.md install error must not take down register()."""
+    from clawmes import persona
+
+    def boom():
+        raise OSError("disk full")
+
+    monkeypatch.setattr(persona, "ensure_soul_md", boom)
+    clawmes.register(mock_ctx)  # must not raise
+
+    # Other subsystems still wired
+    assert any(t["name"] == "transfer" for t in mock_ctx.tools)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_state(tmp_path, monkeypatch) -> None:
     """Point HERMES_HOME at a temp dir so tests don't touch real state."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    # Reset the service registry between tests so test_register_starts_core_services
+    # sees a clean slate (services are module-singletons; the registry holds them)
+    from clawmes.services.registry import registry
+
+    registry.clear()
