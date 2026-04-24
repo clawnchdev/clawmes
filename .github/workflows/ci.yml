@@ -39,7 +39,7 @@ jobs:
         continue-on-error: true   # non-strict mode at this milestone
 
       - name: Test
-        run: pytest -q --cov=clawmes --cov-report=term-missing
+        run: pytest -q --cov=clawmes --cov-report=term-missing --cov-fail-under=100
 
   bridges-build:
     runs-on: ubuntu-latest
