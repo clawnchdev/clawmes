@@ -4,6 +4,11 @@ gitignored-docs/
 .plans/
 .notes/
 
+# Override the global ~/.gitignore_global '*credential*' rule for our
+# redactor module — the file IS source code, not a credential.
+!clawmes/services/credential_redactor.py
+!tests/services/test_credential_redactor.py
+
 # Python
 __pycache__/
 *.py[cod]
