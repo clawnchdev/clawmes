@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from clawmes.lib.logger import logger_for
+from clawmes.services.credential_redactor import scan_and_redact
 
 _log = logger_for("hooks.transform_terminal_output")
 
@@ -20,7 +21,13 @@ _log = logger_for("hooks.transform_terminal_output")
 def callback(text: str, **kwargs: Any) -> str:
     """Return ``text`` with sensitive substrings redacted.
 
-    Stub at this milestone — passes through. The real implementation
-    delegates to ``services.credential_redactor.scan_and_redact``.
+    Errors during redaction degrade to pass-through so a regex bug in
+    the redactor can't blank out the user's terminal.
     """
-    return text
+    if not text:
+        return text
+    try:
+        return scan_and_redact(text, context="terminal_output")
+    except Exception:
+        _log.exception("transform_terminal_output: redactor raised; passing through")
+        return text

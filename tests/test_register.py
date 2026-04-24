@@ -73,11 +73,12 @@ def test_double_register_is_idempotent(mock_ctx) -> None:
 
 
 def test_register_starts_core_services(mock_ctx) -> None:
-    """start_all should register wallet, coingecko, price, scheduler."""
+    """start_all should register all core services."""
     from clawmes.services.registry import registry
 
     clawmes.register(mock_ctx)
     ids = {svc.id for svc in registry.iter_services()}
+    assert "clawmes.credential_redactor" in ids
     assert "clawmes.wallet" in ids
     assert "clawmes.coingecko" in ids
     assert "clawmes.price" in ids

@@ -39,18 +39,22 @@ def start_all() -> None:
     """
     from clawmes.plans.scheduler import get_scheduler
     from clawmes.services.coingecko import get_coingecko_service
+    from clawmes.services.credential_redactor import get_credential_redactor
     from clawmes.services.price import get_price_service
     from clawmes.services.wallet import get_wallet_service
 
     factories = [
-        # 1. Foundational singletons — wallet first so anything that
+        # 1. Security primitives — credential redactor must be live
+        #    before any tool result flows through transform_tool_result.
+        get_credential_redactor,
+        # 2. Foundational singletons — wallet next so anything that
         #    reads wallet state during start has it ready.
-        get_wallet_service,  # WalletService — currently a stub state holder
-        # 2. Market data — exercised by tools and triggers
-        get_coingecko_service,  # CoinGecko HTTP client (price backend)
-        get_price_service,  # Price router (depends on coingecko)
-        # 3. Background daemons — last so they pick up everything above
-        get_scheduler,  # Plan scheduler (ticking=True; needs cron driver)
+        get_wallet_service,
+        # 3. Market data — exercised by tools and triggers
+        get_coingecko_service,
+        get_price_service,  # depends on coingecko
+        # 4. Background daemons — last so they pick up everything above
+        get_scheduler,  # ticking=True; needs cron driver to actually fire
     ]
     for factory in factories:
         svc = factory()
