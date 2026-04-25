@@ -76,9 +76,7 @@ _API_KEY_RE = re.compile(
 
 # WalletConnect v2 pairing URI. The relay-protocol parameters can carry
 # the symKey, so the entire URI must be redacted.
-_WC_URI_RE = re.compile(
-    r"\bwc:[A-Za-z0-9]{32,}@2(?:\?[A-Za-z0-9_\-=&%.:/]+)?"
-)
+_WC_URI_RE = re.compile(r"\bwc:[A-Za-z0-9]{32,}@2(?:\?[A-Za-z0-9_\-=&%.:/]+)?")
 
 # Bankr session token (placeholder format — Bankr's actual format may
 # evolve; redactor errs on the side of capturing).
