@@ -2,7 +2,7 @@
 
 > Hermes Agent for crypto. The biggest open-source AI assistant, now it handles real money.
 
-Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that turns Hermes into a crypto-native DeFi assistant. It's a Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes instead of OpenClaw.
+Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that turns Hermes into an infinitely extensible crypto-native assistant. It's a Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes instead of OpenClaw.
 
 48 tools. 118 commands. 76 services. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
