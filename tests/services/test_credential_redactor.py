@@ -63,10 +63,7 @@ class TestWalletConnectRedaction:
         assert "[REDACTED:walletconnect_uri" in out
 
     def test_with_query_string(self):
-        uri = (
-            "wc:1234567890abcdef1234567890abcdef@2"
-            "?relay-protocol=irn&symKey=abc123"
-        )
+        uri = "wc:1234567890abcdef1234567890abcdef@2?relay-protocol=irn&symKey=abc123"
         out = scan_and_redact(uri)
         assert "symKey" not in out
         assert "[REDACTED:walletconnect_uri" in out
@@ -132,7 +129,7 @@ class TestHexPrivateKeyRedaction:
     def test_keyword_far_away_does_not_trigger(self):
         # The keyword must be within ~60 chars of the match
         key = "0x" + "a" * 64
-        text = f"private key was discussed earlier. " + ("padding " * 20) + key
+        text = "private key was discussed earlier. " + ("padding " * 20) + key
         # Should NOT match — keyword is too far away
         out = scan_and_redact(text)
         assert key in out  # passed through
@@ -152,15 +149,27 @@ class TestMnemonicRedaction:
         red = CredentialRedactor()
         # Force the wordlist loader to find nothing
         monkeypatch.setattr(red, "_load_wordlist", lambda: None)
-        text = "abandon ability able about above absent absorb abstract absurd abuse access accident"
+        text = (
+            "abandon ability able about above absent absorb abstract absurd abuse access accident"
+        )
         assert red.scan_and_redact(text) == text
 
     def test_redacts_12_words_when_wordlist_present(self):
         red = CredentialRedactor()
         wordlist = frozenset(
             [
-                "abandon", "ability", "able", "about", "above", "absent",
-                "absorb", "abstract", "absurd", "abuse", "access", "accident",
+                "abandon",
+                "ability",
+                "able",
+                "about",
+                "above",
+                "absent",
+                "absorb",
+                "abstract",
+                "absurd",
+                "abuse",
+                "access",
+                "accident",
             ]
         )
         # Inject the wordlist directly
@@ -175,8 +184,20 @@ class TestMnemonicRedaction:
     def test_does_not_redact_unrelated_word_runs(self):
         red = CredentialRedactor()
         wordlist = frozenset(
-            ["abandon", "ability", "able", "about", "above", "absent",
-             "absorb", "abstract", "absurd", "abuse", "access", "accident"]
+            [
+                "abandon",
+                "ability",
+                "able",
+                "about",
+                "above",
+                "absent",
+                "absorb",
+                "abstract",
+                "absurd",
+                "abuse",
+                "access",
+                "accident",
+            ]
         )
         red._wordlist = wordlist
         red._wordlist_loaded = True
@@ -188,9 +209,21 @@ class TestMnemonicRedaction:
     def test_wrong_word_count_skipped(self):
         red = CredentialRedactor()
         wordlist = frozenset(
-            ["abandon", "ability", "able", "about", "above", "absent",
-             "absorb", "abstract", "absurd", "abuse", "access", "accident",
-             "account"]
+            [
+                "abandon",
+                "ability",
+                "able",
+                "about",
+                "above",
+                "absent",
+                "absorb",
+                "abstract",
+                "absurd",
+                "abuse",
+                "access",
+                "accident",
+                "account",
+            ]
         )
         red._wordlist = wordlist
         red._wordlist_loaded = True
@@ -218,7 +251,6 @@ class TestWordlistLoading:
     def test_missing_file_returns_none(self, monkeypatch, tmp_path):
         red = CredentialRedactor()
         # The file path is computed from __file__; patch a fake path
-        from clawmes.services import credential_redactor as cr_mod
 
         # Patch Path(__file__).parent.parent / "data" / "bip39_wordlist.txt"
         # by monkey-patching the relevant lookup is tricky — instead,
@@ -249,13 +281,11 @@ class TestWordlistLoading:
 
     def test_too_short_file_rejected(self, tmp_path, monkeypatch):
         red = CredentialRedactor()
-        # Create a tiny wordlist (< 2000 words → suspicious)
+        # Create a tiny wordlist (< 2000 words → suspicious). Simulate
+        # via patching Path.read_text + Path.exists rather than touching
+        # the real package-data path.
         from pathlib import Path
 
-        target = Path(__file__).parent.parent.parent / "clawmes" / "data" / "bip39_wordlist.txt"
-        # Write a tiny file then restore — but we don't want to actually
-        # touch the package data. Instead, simulate via patching
-        # `read_text`.
         red._wordlist_loaded = False
 
         def short_read(*a, **kw):
@@ -334,7 +364,7 @@ class TestAuditLog:
         import threading
 
         red = CredentialRedactor()
-        secrets = [f"sk-ant-api03-" + str(i).zfill(20) + "x" * 40 for i in range(20)]
+        secrets = ["sk-ant-api03-" + str(i).zfill(20) + "x" * 40 for i in range(20)]
 
         def worker(s):
             red.scan_and_redact(f"key: {s}")
