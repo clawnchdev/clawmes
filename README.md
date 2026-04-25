@@ -1,6 +1,6 @@
 # clawmes
 
-> Hermes Agent for crypto. The biggest open-source AI assistant, now it handles real money.
+> Hermes Agent for crypto. The hottest open-source AI assistant can now handle real money.
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that turns Hermes into an infinitely extensible crypto-native assistant. It's a Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes instead of OpenClaw.
 
