@@ -1,4 +1,4 @@
-"""Tests for clawmes.tools.registry — decorators + register_with_ctx."""
+"""Tests for clawmes.tools.registry — decorators + register_with_ctx + gate."""
 
 from __future__ import annotations
 
@@ -8,12 +8,29 @@ import pytest
 
 from clawmes.lib.params import ParamError
 from clawmes.lib.tool_result import json_result
+from clawmes.policy import storage as policy_storage
+from clawmes.policy import usage_counter as usage_counter_module
+from clawmes.policy.types import Policy
+from clawmes.services import mode_service as mode_module
 from clawmes.tools.registry import (
     WRITE_TOOL_NAMES,
+    _extract_chain_id,
+    _extract_value_wei,
     read_tool,
     register_with_ctx,
     write_tool,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate(tmp_path, monkeypatch):
+    """HERMES_HOME isolation + reset all relevant singletons."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(mode_module, "_instance", None)
+    monkeypatch.setattr(usage_counter_module, "_instance", None)
+    # Make sure each test starts with no policies (empty list, not defaults)
+    policy_storage.save_policies([])
+
 
 SAMPLE_SCHEMA = {
     "type": "object",
@@ -156,3 +173,227 @@ class TestRegisterWithCtx:
 
         with pytest.raises(RuntimeError, match="not a clawmes tool"):
             register_with_ctx(FakeCtx(), naked)
+
+
+# Gate stages -----------------------------------------------------------
+
+
+class TestStage1ReadonlyMode:
+    def test_readonly_blocks_writes(self):
+        @write_tool(name="t_ro_write", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({"ran": True})
+
+        mode_module.get_mode_service().set_mode("readonly")
+        out = json.loads(fn({}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "readonly_mode"
+
+    def test_normal_mode_allows(self):
+        @write_tool(name="t_normal_write", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({"ran": True})
+
+        out = json.loads(fn({}))
+        assert "isError" not in out
+        assert out["details"]["ran"] is True
+
+    def test_danger_mode_allows(self):
+        @write_tool(name="t_danger_write", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({"ran": True})
+
+        mode_module.get_mode_service().set_mode("danger")
+        out = json.loads(fn({}))
+        assert "isError" not in out
+
+
+class TestStage2PolicyBlock:
+    def test_policy_block(self):
+        @write_tool(name="t_pol_block", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({})
+
+        policy_storage.save_policies(
+            [
+                Policy(
+                    name="block-it",
+                    decision="block",
+                    applies_to_tools=("t_pol_block",),
+                    description="for testing",
+                )
+            ]
+        )
+        out = json.loads(fn({}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "policy_block"
+        assert "block-it" in out["content"][0]["text"]
+
+
+class TestStage2PolicyConfirm:
+    def test_first_call_returns_policy_hold(self):
+        @write_tool(name="t_confirm_a", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({"ran": True})
+
+        policy_storage.save_policies(
+            [
+                Policy(
+                    name="confirm-it",
+                    decision="confirm",
+                    applies_to_tools=("t_confirm_a",),
+                )
+            ]
+        )
+        out = json.loads(fn({}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "policy_hold"
+        # The hold message includes a nonce parameter for the LLM to retry with
+        assert "policyConfirmationNonce" in out["content"][0]["text"]
+
+    def test_retry_with_valid_nonce_proceeds(self):
+        @write_tool(name="t_confirm_b", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({"ran": True})
+
+        policy_storage.save_policies(
+            [Policy(name="confirm-it", decision="confirm", applies_to_tools=("t_confirm_b",))]
+        )
+
+        # First call gets a nonce
+        first = json.loads(fn({"to": "alice"}))
+        assert first["details"]["error_code"] == "policy_hold"
+        # Extract the nonce from the message (between quotes)
+        text = first["content"][0]["text"]
+        nonce_marker = 'policyConfirmationNonce="'
+        start = text.index(nonce_marker) + len(nonce_marker)
+        end = text.index('"', start)
+        nonce = text[start:end]
+
+        # Retry with that nonce — same args otherwise
+        second = json.loads(fn({"to": "alice", "policyConfirmationNonce": nonce}))
+        assert "isError" not in second
+        assert second["details"]["ran"] is True
+
+    def test_retry_with_wrong_nonce_returns_new_hold(self):
+        @write_tool(name="t_confirm_c", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({})
+
+        policy_storage.save_policies(
+            [Policy(name="confirm-it", decision="confirm", applies_to_tools=("t_confirm_c",))]
+        )
+        out = json.loads(fn({"policyConfirmationNonce": "completely-bogus"}))
+        assert out["details"]["error_code"] == "policy_hold"
+
+
+class TestStage5RateLimitRecording:
+    def test_successful_call_increments_counter(self):
+        @write_tool(name="t_record_a", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({})
+
+        policy_storage.save_policies([])  # ensure no policy interferes
+        from clawmes.policy.usage_counter import get_usage_counter
+
+        before = get_usage_counter().count("default", "t_record_a")
+        fn({})
+        after = get_usage_counter().count("default", "t_record_a")
+        assert after == before + 1
+
+    def test_failed_call_does_not_increment(self):
+        @write_tool(name="t_record_b", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            raise RuntimeError("simulated failure")
+
+        from clawmes.policy.usage_counter import get_usage_counter
+
+        before = get_usage_counter().count("default", "t_record_b")
+        fn({})  # converts exception to error envelope
+        after = get_usage_counter().count("default", "t_record_b")
+        # The handler raised before stage 5 — counter not incremented
+        assert after == before
+
+    def test_blocked_call_does_not_increment(self):
+        @write_tool(name="t_record_c", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({})
+
+        policy_storage.save_policies(
+            [Policy(name="block", decision="block", applies_to_tools=("t_record_c",))]
+        )
+        from clawmes.policy.usage_counter import get_usage_counter
+
+        before = get_usage_counter().count("default", "t_record_c")
+        fn({})
+        after = get_usage_counter().count("default", "t_record_c")
+        # Stage 2 returned before the handler ran — no record
+        assert after == before
+
+
+class TestUserIdScoping:
+    def test_per_user_id_in_action_context(self):
+        recorded = {}
+
+        @write_tool(name="t_user_id", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            recorded["user_id"] = kw.get("user_id")
+            return json_result({})
+
+        fn({}, user_id="alice")
+        assert recorded["user_id"] == "alice"
+
+    def test_default_user_when_missing(self):
+        @write_tool(name="t_default_user", toolset="t", description="d", schema=SAMPLE_SCHEMA)
+        def fn(args, **kw):
+            return json_result({})
+
+        # Policy with rate limit on this tool
+        policy_storage.save_policies([])
+
+        # Run twice without user_id; both should record under "default"
+        fn({})
+        fn({})
+        from clawmes.policy.usage_counter import get_usage_counter
+
+        assert get_usage_counter().count("default", "t_default_user") == 2
+
+
+class TestExtractHelpers:
+    def test_extract_chain_id_from_chain_id_key(self):
+        assert _extract_chain_id({"chain_id": 8453}) == 8453
+
+    def test_extract_chain_id_from_chain_key(self):
+        assert _extract_chain_id({"chain": 8453}) == 8453
+
+    def test_extract_chain_id_string(self):
+        assert _extract_chain_id({"chain_id": "1"}) == 1
+
+    def test_extract_chain_id_invalid_returns_none(self):
+        assert _extract_chain_id({"chain_id": "not-a-number"}) is None
+
+    def test_extract_chain_id_missing_returns_none(self):
+        assert _extract_chain_id({}) is None
+        assert _extract_chain_id(None) is None
+
+    def test_extract_value_wei_from_value_wei(self):
+        assert _extract_value_wei({"value_wei": 10**18}) == 10**18
+
+    def test_extract_value_wei_from_amount_wei(self):
+        assert _extract_value_wei({"amount_wei": 500}) == 500
+
+    def test_extract_value_wei_string(self):
+        assert _extract_value_wei({"value_wei": "100"}) == 100
+
+    def test_extract_value_wei_invalid_falls_through(self):
+        # Bad value at first key doesn't poison subsequent keys
+        assert _extract_value_wei({"value_wei": "bad", "amount_wei": "200"}) == 200
+
+    def test_extract_value_wei_missing_returns_none(self):
+        assert _extract_value_wei({}) is None
+        assert _extract_value_wei(None) is None
+        assert _extract_value_wei({"unrelated": "x"}) is None
+
+    def test_extract_value_wei_all_invalid_returns_none(self):
+        # Every candidate key has a non-int value
+        assert _extract_value_wei({"value_wei": "x", "amount_wei": "y"}) is None

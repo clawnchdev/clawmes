@@ -5,16 +5,14 @@ Two decorators:
   * :func:`write_tool` — for any tool that mutates on-chain state. The
     decorated handler runs through the pipeline:
 
-      1. Readonly-mode check (``/safemode`` toggle)
+      1. Readonly-mode check (``/safemode`` toggle) — block if active
       2. Policy evaluation (``allow | block | confirm``)
          - ``confirm`` returns a ``POLICY HOLD`` instruction to the LLM
            with a one-time nonce; the LLM relays to the user, gets approval,
            and retries with the nonce in ``policyConfirmationNonce``.
-      3. Delegation execution (EIP-7710) — if a delegation is configured
-         for this action, the SA bridge handles the tx and we skip the
-         original handler.
+      3. Delegation execution (EIP-7710) — TODO; tracked in PRD §6.7.
       4. Original handler execution.
-      5. Ledger record on success.
+      5. Usage counter + ledger record on success.
 
   * :func:`read_tool` — for read-only tools. Skips the gate; only wraps in
     a generic try/except that converts unexpected exceptions to a clean
@@ -24,10 +22,8 @@ The set of write tools is implicit — ``WRITE_TOOL_NAMES`` is populated as
 ``@write_tool`` decorators are evaluated at import time. There is no second
 source of truth, so additions can never drift.
 
-The actual policy / readonly / delegation / ledger machinery is built up in
-later commits. Until those land, the gate stages are no-ops and only stage
-4 executes — but the wiring is in place so adding the gates is a
-non-disruptive change.
+Stage 3 (delegation) remains a TODO at this milestone; everything else
+is live.
 """
 
 from __future__ import annotations
@@ -38,6 +34,11 @@ from typing import Any
 
 from clawmes.lib.params import ParamError
 from clawmes.lib.tool_result import error_result
+from clawmes.policy.confirm_store import store as _confirm_store
+from clawmes.policy.evaluator import evaluate as _evaluate
+from clawmes.policy.evaluator import record_invocation as _record_invocation
+from clawmes.policy.types import ActionContext
+from clawmes.services.mode_service import is_readonly as _is_readonly
 
 WRITE_TOOL_NAMES: set[str] = set()
 """Names of every tool decorated with ``@write_tool``. Populated at import
@@ -66,22 +67,61 @@ def write_tool(
     def decorator(fn: Callable[..., str]) -> Callable[..., str]:
         @functools.wraps(fn)
         def gated(args: dict[str, Any], **kwargs: Any) -> str:
-            # Stages 1-3 are skeletons until the policy / delegation
-            # services land. They short-circuit safely for now.
-            try:
-                # Stage 1: readonly-mode check (no-op stub)
-                # Stage 2: policy evaluation (no-op stub)
-                # Stage 3: delegation attempt (no-op stub)
+            user_id = str(kwargs.get("user_id") or "default")
+            action_ctx = ActionContext(
+                tool_name=name,
+                args=args,
+                user_id=user_id,
+                chain_id=_extract_chain_id(args),
+                value_wei=_extract_value_wei(args),
+            )
 
-                # Stage 4: actual handler
-                return fn(args, **kwargs)
+            # Stage 1: readonly-mode check
+            if _is_readonly(user_id):
+                return error_result(
+                    "Clawmes is in readonly mode. Use /dangermode to "
+                    "enable writes (or /safemode off).",
+                    code="readonly_mode",
+                )
+
+            # Stage 2: policy evaluation
+            decision = _evaluate(action_ctx)
+            if decision.kind == "block":
+                return error_result(
+                    f"Blocked by policy {decision.policy_name!r}: {decision.reason}",
+                    code="policy_block",
+                )
+            if decision.kind == "confirm":
+                supplied = (args or {}).get("policyConfirmationNonce")
+                if supplied and _confirm_store.consume(action_ctx, str(supplied)):
+                    pass  # Confirmed — fall through to stage 4
+                else:
+                    nonce = _confirm_store.issue(action_ctx)
+                    return error_result(
+                        f"POLICY HOLD: this {name} requires confirmation "
+                        f"per policy {decision.policy_name!r} "
+                        f"({decision.reason}). Show the user the action "
+                        f"summary and ask for explicit confirmation. Once "
+                        f"confirmed, retry this tool call with the parameter "
+                        f'policyConfirmationNonce="{nonce}".',
+                        code="policy_hold",
+                    )
+
+            # Stage 3: delegation attempt — TODO when SA bridge lands
+
+            # Stage 4: actual handler
+            try:
+                result = fn(args, **kwargs)
             except ParamError as exc:
                 return error_result(str(exc), code="param_error")
             except Exception as exc:  # noqa: BLE001 — defensive; tools must never raise
                 return error_result(f"Tool execution failed: {exc!s}", code="tool_error")
-            finally:
-                # Stage 5: ledger record on success (no-op stub)
-                pass
+
+            # Stage 5: record successful invocation for rate-limit policies.
+            # Ledger append is handled by the post_tool_call hook so we
+            # don't double-record here.
+            _record_invocation(action_ctx)
+            return result
 
         gated._clawmes_meta = {  # type: ignore[attr-defined]
             "name": name,
@@ -95,6 +135,43 @@ def write_tool(
         return gated
 
     return decorator
+
+
+def _extract_chain_id(args: dict[str, Any] | None) -> int | None:
+    if not args:
+        return None
+    raw = args.get("chain_id") or args.get("chain")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_value_wei(args: dict[str, Any] | None) -> int | None:
+    """Best-effort extraction of the wei value at risk.
+
+    Looks at common arg names — ``value_wei``, ``amount_wei``,
+    ``amount`` — and converts. ``amount`` is human-readable so it
+    requires a token decimals lookup we don't have here; we conservatively
+    skip it and leave the policy gate to the per-tool layer for that case.
+
+    Returns None when the arg shape doesn't map cleanly. Policy
+    quantitative gates that depend on value_wei silently won't fire on
+    None; callers that need a strict gate should set the arg explicitly.
+    """
+    if not args:
+        return None
+    for key in ("value_wei", "amount_wei"):
+        raw = args.get(key)
+        if raw is None:
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def read_tool(

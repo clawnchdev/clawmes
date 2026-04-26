@@ -1,54 +1,93 @@
-"""Policy evaluator.
+"""Policy evaluator — the real implementation.
 
-Given an :class:`ActionContext` (tool name, args, wallet state, current
-time), return a :class:`Decision`:
+Given an :class:`ActionContext`, walk the configured policies in order
+and return the first matching :class:`Decision`. If no policy matches,
+default to ``allow``.
 
-  * ``allow``   — proceed without prompt
-  * ``block``   — refuse with a human-readable reason
-  * ``confirm`` — require a one-time nonce round-trip with the user
+A policy "matches" when:
 
-The evaluator is **deterministic** and **stateless** with respect to the
-calling ``ActionContext`` — same input → same decision. The confirm
-nonce is issued separately by ``ConfirmStore``.
+  1. Its filter predicates accept the context (tool name, chain id).
+  2. EITHER it has no quantitative gates (catch-all rule), OR at least
+     one of its gates is exceeded:
+       - ``max_amount_wei`` exceeded by ``ctx.value_wei``
+       - ``max_per_hour`` exceeded by the usage counter
 
-This module is a stub at this milestone — every action returns ``allow``
-so the gating decorator skeleton in ``tools/registry.py`` is exercised
-end-to-end. The real evaluator comes online in v0.2.0 alongside the NL
-policy parser.
+When a policy matches, its ``decision`` is the result. If multiple
+policies could match the same context, the first one in storage order
+wins — users can re-order via the policy file or the ``/policy``
+command. Block decisions take precedence over confirm via this
+ordering when a stricter policy is listed first.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Literal
+from collections.abc import Iterable
 
+from clawmes.lib.logger import logger_for
+from clawmes.policy.storage import load_policies
+from clawmes.policy.types import ActionContext, Decision, Policy
+from clawmes.policy.usage_counter import get_usage_counter
 
-@dataclass(frozen=True)
-class ActionContext:
-    """Snapshot of a write-tool invocation, fed to the evaluator."""
-
-    tool_name: str
-    args: dict[str, Any]
-    user_id: str = "default"
-    chain_id: int | None = None
-
-
-@dataclass(frozen=True)
-class Decision:
-    kind: Literal["allow", "block", "confirm"]
-    policy_name: str = ""
-    reason: str = ""
-
+_log = logger_for("policy.evaluator")
 
 _ALLOW = Decision(kind="allow")
 
 
-def evaluate(ctx: ActionContext) -> Decision:
+def evaluate(
+    ctx: ActionContext,
+    *,
+    policies: Iterable[Policy] | None = None,
+) -> Decision:
     """Return the policy decision for ``ctx``.
 
-    Stub implementation — always allows. The real evaluator iterates
-    configured policies (loaded from
-    ``${HERMES_HOME}/clawmes/policy/policies.json``) and short-circuits
-    on the first match.
+    ``policies`` is exposed for tests; production callers use the
+    persisted set via :func:`load_policies`.
     """
+    rules = list(policies) if policies is not None else load_policies()
+    counter = get_usage_counter()
+
+    for policy in rules:
+        if not policy.matches_filters(ctx):
+            continue
+        if policy.has_quantitative_gates():
+            if not _gate_triggers(policy, ctx, counter):
+                continue
+        # Filters matched and either no gates or at least one fired.
+        return Decision(
+            kind=policy.decision,
+            policy_name=policy.name,
+            reason=policy.description or _default_reason(policy, ctx),
+        )
+
     return _ALLOW
+
+
+def record_invocation(ctx: ActionContext) -> None:
+    """Record this invocation in the usage counter.
+
+    Called by the ``@write_tool`` decorator on successful execution
+    so future evaluations can see the rate.
+    """
+    get_usage_counter().record(ctx.user_id, ctx.tool_name)
+
+
+def _gate_triggers(policy: Policy, ctx: ActionContext, counter) -> bool:
+    """Return True iff at least one quantitative gate is exceeded."""
+    if policy.max_amount_wei is not None:
+        if ctx.value_wei is not None and ctx.value_wei >= policy.max_amount_wei:
+            return True
+    if policy.max_per_hour is not None:
+        n = counter.count(ctx.user_id, ctx.tool_name)
+        if n >= policy.max_per_hour:
+            return True
+    return False
+
+
+def _default_reason(policy: Policy, ctx: ActionContext) -> str:
+    parts: list[str] = []
+    if policy.max_amount_wei is not None and ctx.value_wei is not None:
+        parts.append(f"value {ctx.value_wei} >= threshold {policy.max_amount_wei}")
+    if policy.max_per_hour is not None:
+        n = get_usage_counter().count(ctx.user_id, ctx.tool_name)
+        parts.append(f"{n} invocations >= rate cap {policy.max_per_hour}/hr")
+    return "; ".join(parts) if parts else f"matched policy {policy.name!r}"
