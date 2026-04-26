@@ -4,10 +4,20 @@ gitignored-docs/
 .plans/
 .notes/
 
-# Override the global ~/.gitignore_global '*credential*' rule for our
-# redactor module — the file IS source code, not a credential.
-!clawmes/services/credential_redactor.py
-!tests/services/test_credential_redactor.py
+# Override broad ~/.gitignore_global patterns ('*credential*', '*token*',
+# '*secret*', etc.) for project source files. These globals are useful
+# for keeping rogue .env-style files out of repos, but they also silently
+# eat source modules whose names happen to contain those substrings.
+# Re-include all source / test / data files in the project tree.
+!clawmes/**/*.py
+!clawmes/**/*.md
+!clawmes/**/*.yaml
+!clawmes/**/*.yml
+!clawmes/**/*.json
+!clawmes/**/*.txt
+!clawmes/**/*.toml
+!tests/**/*.py
+!tests/**/*.md
 
 # Python
 __pycache__/
