@@ -85,8 +85,7 @@ class TokenDecimalsService(Service):
             decimals = decode_uint8(raw)
         except (RpcError, ValueError) as exc:
             _log.warning(
-                "decimals() lookup failed for %s on chain %d (%s); "
-                "falling back to 18",
+                "decimals() lookup failed for %s on chain %d (%s); falling back to 18",
                 address,
                 chain_id,
                 exc,
