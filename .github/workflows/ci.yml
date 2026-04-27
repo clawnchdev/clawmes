@@ -43,7 +43,6 @@ jobs:
 
   bridges-build:
     runs-on: ubuntu-latest
-    if: false  # disabled until bridge sources land
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,8 +53,43 @@ jobs:
           cd clawmes/bridges/sources/wc
           npm ci
           npm run build
-      - name: Build sa bridge
+          test -f dist/index.mjs
+      # The sa bridge will land in a follow-up commit; gating with a
+      # presence check so this job stays green until then.
+      - name: Build sa bridge (if present)
         run: |
-          cd clawmes/bridges/sources/sa
+          if [ -d clawmes/bridges/sources/sa ]; then
+            cd clawmes/bridges/sources/sa
+            npm ci
+            npm run build
+            test -f dist/index.mjs
+          else
+            echo "sa bridge sources not yet present — skipping"
+          fi
+
+  bridges-integration:
+    runs-on: ubuntu-latest
+    needs: bridges-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Build wc bridge
+        run: |
+          cd clawmes/bridges/sources/wc
           npm ci
           npm run build
+      - name: Run integration tests
+        env:
+          RUN_BRIDGE_INTEGRATION: "1"
+        run: pytest tests/bridges/test_process_integration.py -v
