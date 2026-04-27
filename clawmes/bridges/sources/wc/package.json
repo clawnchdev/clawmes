@@ -1,0 +1,20 @@
+{
+  "name": "clawmes-wc-bridge",
+  "version": "0.1.0",
+  "description": "WalletConnect v2 sign-client bridge for clawmes — JSON-line stdio RPC",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/index.mjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').renameSync('dist/index.js','dist/index.mjs')\"",
+    "start": "node dist/index.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "5.5.4",
+    "@types/node": "22.5.4"
+  }
+}
