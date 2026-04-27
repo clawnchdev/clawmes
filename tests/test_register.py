@@ -59,7 +59,10 @@ def test_register_wires_clawmes_cli_subcommand(mock_ctx) -> None:
 def test_register_wires_at_least_one_skill(mock_ctx) -> None:
     clawmes.register(mock_ctx)
     names = {s["name"] for s in mock_ctx.skills}
-    assert "transfer" in names
+    # Six bundled skills land at this milestone; more arrive as the
+    # crypto-extension port progresses.
+    expected = {"transfer", "defi-trading", "lending", "staking", "bridge", "block-explorer"}
+    assert expected.issubset(names)
 
 
 def test_double_register_is_idempotent(mock_ctx) -> None:
