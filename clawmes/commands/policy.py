@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from clawmes.policy.parser import ParseError, parse_policy
 from clawmes.policy.storage import load_policies, save_policies
 from clawmes.services.mode_service import get_mode_service
 
@@ -10,11 +11,36 @@ async def handle_policy(raw_args: str) -> str:
     text = raw_args.strip()
     if not text:
         return _list_policies()
+
+    try:
+        new_policy = parse_policy(text)
+    except ParseError as exc:
+        return f"Couldn't parse policy: {exc}"
+
+    # Append to the persisted list. Block rules conventionally come
+    # first (so they win over later confirm rules); for v0.1 we simply
+    # append — users can re-order via `/policy_clear` and re-adding,
+    # or by editing the JSON directly.
+    existing = load_policies()
+    existing.append(new_policy)
+    save_policies(existing)
     return (
-        f"Setting policies from natural language is not yet implemented "
-        f"at this milestone. Got: {text!r}\n\n"
-        "Edit ~/.hermes/clawmes/policy/policies.json directly to add rules."
+        f"Added policy {new_policy.name!r} → {new_policy.decision}.\n"
+        f"  {_render_constraints(new_policy)}"
     )
+
+
+def _render_constraints(p) -> str:
+    parts: list[str] = []
+    if p.applies_to_tools:
+        parts.append("tools=" + ",".join(p.applies_to_tools))
+    if p.chain_ids:
+        parts.append("chains=" + ",".join(str(c) for c in p.chain_ids))
+    if p.max_amount_wei is not None:
+        parts.append(f"max_amount_wei={p.max_amount_wei}")
+    if p.max_per_hour is not None:
+        parts.append(f"max_per_hour={p.max_per_hour}")
+    return "; ".join(parts) if parts else "(catch-all)"
 
 
 def _list_policies() -> str:
@@ -23,17 +49,7 @@ def _list_policies() -> str:
         return "Active policies: (none)"
     lines = ["Active policies:"]
     for p in policies:
-        constraints = []
-        if p.applies_to_tools:
-            constraints.append("tools=" + ",".join(p.applies_to_tools))
-        if p.chain_ids:
-            constraints.append("chains=" + ",".join(str(c) for c in p.chain_ids))
-        if p.max_amount_wei is not None:
-            constraints.append(f"max_amount_wei={p.max_amount_wei}")
-        if p.max_per_hour is not None:
-            constraints.append(f"max_per_hour={p.max_per_hour}")
-        constraint_text = "; ".join(constraints) if constraints else "(catch-all)"
-        lines.append(f"  • {p.name} → {p.decision} :: {constraint_text}")
+        lines.append(f"  • {p.name} → {p.decision} :: {_render_constraints(p)}")
         if p.description:
             lines.append(f"      {p.description}")
     return "\n".join(lines)

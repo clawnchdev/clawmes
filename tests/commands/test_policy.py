@@ -32,10 +32,32 @@ class TestPolicy:
         assert "(none)" in out
 
     @pytest.mark.asyncio
-    async def test_set_policies_not_yet_implemented(self):
-        out = await policy_cmd.handle_policy("approve under 0.05 ETH")
-        assert "not yet implemented" in out
-        assert "approve under 0.05 ETH" in out
+    async def test_set_policy_via_nl_succeeds(self):
+        # New parser handles this — should add a policy and report
+        out = await policy_cmd.handle_policy("approve transfers under 0.05 ETH")
+        assert "Added policy" in out
+        assert "transfer" in out
+
+    @pytest.mark.asyncio
+    async def test_set_policy_persists(self):
+        from clawmes.policy.storage import load_policies
+
+        await policy_cmd.handle_policy_clear("")  # start empty
+        await policy_cmd.handle_policy("block all swaps")
+        loaded = load_policies()
+        names = {p.name for p in loaded}
+        assert "block-all-defi_swap" in names
+
+    @pytest.mark.asyncio
+    async def test_set_policy_unparseable(self):
+        out = await policy_cmd.handle_policy("do something complicated and unparseable")
+        assert "Couldn't parse policy" in out
+
+    @pytest.mark.asyncio
+    async def test_set_policy_rate_limit(self):
+        out = await policy_cmd.handle_policy("max 5 transfers per hour")
+        assert "Added policy" in out
+        assert "max_per_hour=5" in out
 
     @pytest.mark.asyncio
     async def test_policy_clear_writes_empty_list(self):
