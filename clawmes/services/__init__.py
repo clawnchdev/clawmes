@@ -42,6 +42,7 @@ def start_all() -> None:
     from clawmes.services.credential_redactor import get_credential_redactor
     from clawmes.services.explorer import get_explorer_service
     from clawmes.services.mode_service import get_mode_service
+    from clawmes.services.persona_service import get_persona_service
     from clawmes.services.price import get_price_service
     from clawmes.services.rpc import get_rpc_service
     from clawmes.services.token_decimals import get_token_decimals_service
@@ -54,6 +55,9 @@ def start_all() -> None:
         # 2. Mode service — used by stage 1 of the @write_tool gate.
         #    Live before any tool dispatch.
         get_mode_service,
+        # 2a. Persona service — read by the pre_llm_call hook to inject
+        #     the active persona snippet into the per-turn context.
+        get_persona_service,
         # 3. RPC client — read-side foundation; many other services
         #    (token_decimals, wallet, balance tools) depend on it.
         get_rpc_service,
