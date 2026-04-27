@@ -54,19 +54,102 @@ class TestWalletStatus:
 
 class TestConnect:
     @pytest.mark.asyncio
-    async def test_connect_stub(self):
+    async def test_connect_surfaces_pair_uri(self, monkeypatch, tmp_path):
+        # Mock connect_walletconnect to return a state with a pair URI
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+
+        svc = wallet_svc.get_wallet_service()
+        monkeypatch.setattr(
+            svc,
+            "connect_walletconnect",
+            lambda: WalletState(
+                connected=False,
+                mode="walletconnect",
+                balances={"_pair_uri": "wc:abc@2"},
+            ),
+        )
         out = await wallet_cmd.handle_connect("")
-        assert "not yet implemented" in out
+        assert "wc:abc@2" in out
+        assert "phone wallet" in out
+
+    @pytest.mark.asyncio
+    async def test_connect_no_uri_returned(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        monkeypatch.setattr(
+            svc,
+            "connect_walletconnect",
+            lambda: WalletState(connected=False, mode="walletconnect"),
+        )
+        out = await wallet_cmd.handle_connect("")
+        assert "no URI was returned" in out
+
+    @pytest.mark.asyncio
+    async def test_connect_config_error(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def boom():
+            raise wallet_svc.WalletConfigError("bridge unavailable")
+
+        monkeypatch.setattr(svc, "connect_walletconnect", boom)
+        out = await wallet_cmd.handle_connect("")
+        assert "WalletConnect setup error" in out
+        assert "bridge unavailable" in out
+
+    @pytest.mark.asyncio
+    async def test_connect_missing_project_id(self, monkeypatch, tmp_path):
+        from clawmes.bridges.process import BridgeError
+        from clawmes.services import wallet as wallet_svc
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def boom():
+            raise BridgeError("config_error", "WALLETCONNECT_PROJECT_ID not set")
+
+        monkeypatch.setattr(svc, "connect_walletconnect", boom)
+        out = await wallet_cmd.handle_connect("")
+        assert "WALLETCONNECT_PROJECT_ID" in out
+        assert "cloud.walletconnect.com" in out
+
+    @pytest.mark.asyncio
+    async def test_connect_other_bridge_error(self, monkeypatch, tmp_path):
+        from clawmes.bridges.process import BridgeError
+        from clawmes.services import wallet as wallet_svc
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def boom():
+            raise BridgeError("network", "relay unreachable")
+
+        monkeypatch.setattr(svc, "connect_walletconnect", boom)
+        out = await wallet_cmd.handle_connect("")
+        assert "WalletConnect bridge error" in out
 
     @pytest.mark.asyncio
     async def test_disconnect_when_disconnected(self, disconnected_state):
-        with patch("clawmes.commands.wallet.get_wallet_state", return_value=disconnected_state):
+        with patch(_PATCH_PATH, return_value=disconnected_state):
             out = await wallet_cmd.handle_disconnect("")
         assert "No active wallet session" in out
 
     @pytest.mark.asyncio
     async def test_disconnect_when_connected(self, connected_state):
-        with patch("clawmes.commands.wallet.get_wallet_state", return_value=connected_state):
+        with patch(_PATCH_PATH, return_value=connected_state):
             out = await wallet_cmd.handle_disconnect("")
         assert "not yet implemented" in out
 

@@ -58,12 +58,20 @@ export async function pair(_params: unknown): Promise<{ uri: string; topic: stri
   // caller).
   void approval()
     .then((session) => {
-      // Notification side-channel — emitted by index.ts via the
-      // notification queue.
+      // Flatten accounts from all namespaces. WC accounts are
+      // formatted as 'eip155:<chainId>:<address>' — the Python
+      // consumer parses each entry to derive (address, chain_id).
+      const accounts = Object.values(session.namespaces).flatMap(
+        (ns) => ns.accounts ?? [],
+      );
       process.stdout.write(
         JSON.stringify({
           method: "pairing_approved",
-          params: { topic: session.topic, peer: session.peer.metadata },
+          params: {
+            topic: session.topic,
+            peer: session.peer.metadata,
+            accounts,
+          },
         }) + "\n",
       );
     })

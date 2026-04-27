@@ -27,9 +27,31 @@ async def handle_wallet(raw_args: str) -> str:
 
 
 async def handle_connect(raw_args: str) -> str:
+    from clawmes.bridges.process import BridgeError
+    from clawmes.services.wallet import WalletConfigError, get_wallet_service
+
+    svc = get_wallet_service()
+    try:
+        state = svc.connect_walletconnect()
+    except WalletConfigError as exc:
+        return f"WalletConnect setup error: {exc}"
+    except BridgeError as exc:
+        if exc.code == "config_error":
+            return (
+                "WalletConnect requires WALLETCONNECT_PROJECT_ID. "
+                "Get one free at https://cloud.walletconnect.com and "
+                "set it in ~/.hermes/.env."
+            )
+        return f"WalletConnect bridge error: {exc}"
+
+    uri = state.balances.get("_pair_uri", "")
+    if not uri:
+        return "WalletConnect pairing started but no URI was returned."
     return (
-        "WalletConnect pairing not yet implemented at this milestone. "
-        "The Node WC bridge ships in a forthcoming commit."
+        "Scan this QR / open the link on your phone wallet to pair:\n\n"
+        f"```\n{uri}\n```\n\n"
+        "Once you approve in your wallet, your address and chain will "
+        "appear automatically. Run /wallet to confirm."
     )
 
 

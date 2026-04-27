@@ -47,6 +47,7 @@ def start_all() -> None:
     from clawmes.services.rpc import get_rpc_service
     from clawmes.services.token_decimals import get_token_decimals_service
     from clawmes.services.wallet import get_wallet_service
+    from clawmes.services.wc_notifications import get_wc_notification_consumer
 
     factories = [
         # 1. Security primitives — credential redactor must be live
@@ -74,6 +75,7 @@ def start_all() -> None:
         get_price_service,  # depends on coingecko
         # 7. Background daemons — last so they pick up everything above.
         get_scheduler,  # ticking=True; needs cron driver to actually fire
+        get_wc_notification_consumer,  # threaded; routes WC bridge notifs
     ]
     for factory in factories:
         svc = factory()
