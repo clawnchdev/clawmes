@@ -40,6 +40,7 @@ def start_all() -> None:
     from clawmes.plans.scheduler import get_scheduler
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.credential_redactor import get_credential_redactor
+    from clawmes.services.explorer import get_explorer_service
     from clawmes.services.mode_service import get_mode_service
     from clawmes.services.price import get_price_service
     from clawmes.services.rpc import get_rpc_service
@@ -58,6 +59,9 @@ def start_all() -> None:
         get_rpc_service,
         # 4. Token decimals cache — depends on RPC.
         get_token_decimals_service,
+        # 4a. Block-explorer client — read-side, no dependencies; lives
+        #     here so block_explorer tool dispatch is ready.
+        get_explorer_service,
         # 5. Wallet — depends on credentials being readable; reads
         #    chain state via RPC at first use.
         get_wallet_service,

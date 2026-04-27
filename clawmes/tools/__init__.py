@@ -27,7 +27,7 @@ def register_all(ctx) -> None:
     catalog. Most-used tools first. The full 48-tool roster comes online
     across v0.1.0 → v0.5.0; this list grows as each tool module lands.
     """
-    from clawmes.tools import defi_balance, defi_price, transfer
+    from clawmes.tools import block_explorer, defi_balance, defi_price, transfer
 
-    for mod in (transfer, defi_price, defi_balance):
+    for mod in (transfer, defi_price, defi_balance, block_explorer):
         mod.register(ctx)
