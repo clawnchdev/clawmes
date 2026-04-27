@@ -12,12 +12,19 @@
  *   Response err: {"id": "<uuid>", "error": {"code": "<str>", "message": "<str>"}}
  *   Notification: {"method": "<event>", "params": {...}}   (no id)
  *
- * v0.1 milestone exposes only `health`. WalletConnect-specific methods
- * (pair, session_status, request_signature, ...) land in subsequent
- * commits as the @walletconnect/sign-client integration is built out.
+ * Methods (PRD §21.2):
+ *   health, pair, session_status, disconnect, request_signature, switch_chain
  */
 
 import * as readline from "node:readline";
+import {
+  MethodError,
+  disconnect,
+  pair,
+  request_signature,
+  session_status,
+  switch_chain,
+} from "./methods.js";
 
 interface RpcRequest {
   id?: string;
@@ -38,31 +45,40 @@ function send(record: RpcResponse): void {
   process.stdout.write(JSON.stringify(record) + "\n");
 }
 
-async function dispatch(method: string, _params: unknown): Promise<unknown> {
-  switch (method) {
-    case "health":
-      return {
-        version: VERSION,
-        node_version: process.versions.node,
-        uptime_s: Math.floor((Date.now() - startTime) / 1000),
-      };
-    default:
-      throw new RpcError("method_not_implemented", `method ${method} not implemented`);
+
+type Handler = (params: unknown) => Promise<unknown>;
+
+const HANDLERS: Record<string, Handler> = {
+  health: async () => ({
+    version: VERSION,
+    node_version: process.versions.node,
+    uptime_s: Math.floor((Date.now() - startTime) / 1000),
+  }),
+  pair: pair as Handler,
+  session_status: session_status as Handler,
+  disconnect: disconnect as Handler,
+  request_signature: request_signature as Handler,
+  switch_chain: switch_chain as Handler,
+};
+
+
+async function dispatch(method: string, params: unknown): Promise<unknown> {
+  const handler = HANDLERS[method];
+  if (!handler) {
+    throw new MethodError(
+      "method_not_implemented",
+      `method ${method} not implemented`,
+    );
   }
+  return handler(params);
 }
 
-class RpcError extends Error {
-  constructor(public code: string, message: string, public data?: unknown) {
-    super(message);
-  }
-}
 
 async function handleLine(raw: string): Promise<void> {
   let req: RpcRequest;
   try {
     req = JSON.parse(raw) as RpcRequest;
   } catch (err) {
-    // Can't even parse the request — emit a generic error with no id
     send({ error: { code: "parse_error", message: String(err) } });
     return;
   }
@@ -79,8 +95,11 @@ async function handleLine(raw: string): Promise<void> {
     const result = await dispatch(req.method, req.params ?? {});
     send({ id: req.id, result });
   } catch (err) {
-    if (err instanceof RpcError) {
-      send({ id: req.id, error: { code: err.code, message: err.message, data: err.data } });
+    if (err instanceof MethodError) {
+      send({
+        id: req.id,
+        error: { code: err.code, message: err.message, data: err.data },
+      });
     } else {
       send({
         id: req.id,
@@ -89,6 +108,7 @@ async function handleLine(raw: string): Promise<void> {
     }
   }
 }
+
 
 function main(): void {
   const rl = readline.createInterface({
@@ -107,12 +127,11 @@ function main(): void {
     process.exit(0);
   });
 
-  // Surface uncaught errors via stderr so the Python parent's bridge
-  // log captures them instead of dying silently.
   process.on("uncaughtException", (err) => {
     process.stderr.write(`[clawmes-wc-bridge] uncaughtException: ${err}\n`);
     process.exit(1);
   });
 }
+
 
 main();

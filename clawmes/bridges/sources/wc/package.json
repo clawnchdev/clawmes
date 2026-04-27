@@ -12,7 +12,9 @@
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').renameSync('dist/index.js','dist/index.mjs')\"",
     "start": "node dist/index.mjs"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@walletconnect/sign-client": "2.17.0"
+  },
   "devDependencies": {
     "typescript": "5.5.4",
     "@types/node": "22.5.4"

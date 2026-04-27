@@ -92,3 +92,36 @@ class TestRealBridge:
 
         assert len(results) == 10
         assert errors == []
+
+
+class TestWcMethodsWithoutProjectId:
+    """Methods that need WC SDK init should fail cleanly with config_error
+    when WALLETCONNECT_PROJECT_ID isn't set."""
+
+    @pytest.fixture
+    def bridge_no_project_id(self, monkeypatch):
+        if not _node_available():
+            pytest.skip("node binary not in PATH")
+        if not _bridge_built():
+            pytest.skip("bridge not built")
+        monkeypatch.delenv("WALLETCONNECT_PROJECT_ID", raising=False)
+        proc = BridgeProcess(name="wc-noproj", entry=_WC_ENTRY)
+        proc.start()
+        yield proc
+        proc.stop()
+
+    @pytest.mark.parametrize(
+        "method,params",
+        [
+            ("pair", {}),
+            ("session_status", {}),
+            ("disconnect", {}),
+            ("request_signature", {"method": "personal_sign", "params": ["hi", "0x"]}),
+            ("switch_chain", {"chain_id": 8453}),
+        ],
+    )
+    def test_method_returns_config_error(self, bridge_no_project_id, method, params):
+        with pytest.raises(BridgeError) as exc_info:
+            bridge_no_project_id.call(method, params, timeout=5.0)
+        assert exc_info.value.code == "config_error"
+        assert "WALLETCONNECT_PROJECT_ID" in exc_info.value.args[0]
