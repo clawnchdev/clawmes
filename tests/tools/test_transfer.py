@@ -128,9 +128,11 @@ class TestEstimate:
         assert details["estimated_gas"] == 62500
         assert details["gas_source"] == "estimateGas"
 
-    def test_estimate_erc20_fallback_when_estimate_fails(
+    def test_estimate_erc20_fallback_on_network_error(
         self, connected_wallet, monkeypatch, fake_rpc
     ):
+        # Non-revert RPC failure (timeout, connection reset) — fall
+        # back to the static ceiling and proceed.
         from clawmes.services import token_decimals as td_mod
         from clawmes.services.rpc import RpcError
 
@@ -138,7 +140,9 @@ class TestEstimate:
         td.get.return_value = 6
         td.get_strict.return_value = 6
         monkeypatch.setattr(td_mod, "_instance", td)
-        fake_rpc.estimate_gas.side_effect = RpcError(-32000, "reverted", method="eth_estimateGas")
+        fake_rpc.estimate_gas.side_effect = RpcError(
+            -32603, "connection reset by peer", method="eth_estimateGas"
+        )
         out = json.loads(
             transfer(
                 {
@@ -155,6 +159,36 @@ class TestEstimate:
         assert details["gas_source"] == "fallback"
         body = out["content"][0]["text"]
         assert "fallback ceiling" in body
+
+    def test_estimate_erc20_simulation_revert_aborts(self, connected_wallet, monkeypatch, fake_rpc):
+        # Revert in the simulation — we surface simulation_reverted
+        # rather than falling back to a static ceiling. The user's
+        # tx WOULD lose gas if we broadcast it, so refuse.
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.rpc import RpcError
+
+        td = MagicMock()
+        td.get.return_value = 6
+        td.get_strict.return_value = 6
+        monkeypatch.setattr(td_mod, "_instance", td)
+        fake_rpc.estimate_gas.side_effect = RpcError(
+            -32000,
+            "execution reverted: insufficient balance",
+            method="eth_estimateGas",
+        )
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "100",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "simulation_reverted"
+        assert "insufficient balance" in out["content"][0]["text"]
 
     def test_estimate_erc20_no_wallet(self, monkeypatch, fake_rpc):
         # When estimating without a connected wallet, there's no from
@@ -540,9 +574,11 @@ class TestSendNative:
         assert out["isError"] is True
         assert out["details"]["error_code"] == "decimals_lookup_failed"
 
-    def test_send_erc20_estimate_failure_uses_fallback(
+    def test_send_erc20_estimate_network_failure_uses_fallback(
         self, connected_wallet, fake_mode, fake_rpc, monkeypatch
     ):
+        # Non-revert RPC failure — fall back, broadcast anyway. The
+        # actual tx may still mine if the network recovers.
         from clawmes.services import token_decimals as td_mod
         from clawmes.services.rpc import RpcError
 
@@ -550,12 +586,8 @@ class TestSendNative:
         td.get.return_value = 6
         td.get_strict.return_value = 6
         monkeypatch.setattr(td_mod, "_instance", td)
-        # Simulate estimateGas reverting (e.g. balance too low for the
-        # simulated tx). The tool should still proceed with the static
-        # fallback gas, since the user might have enough balance by the
-        # time the actual tx mines.
         fake_rpc.estimate_gas.side_effect = RpcError(
-            -32000, "execution reverted: insufficient balance", method="eth_estimateGas"
+            -32603, "request timed out", method="eth_estimateGas"
         )
         out = json.loads(
             transfer(
@@ -573,6 +605,72 @@ class TestSendNative:
         assert details["gas_limit"] == 100_000
         kwargs = fake_mode.send_transaction.call_args.kwargs
         assert kwargs["gas"] == 100_000
+
+    def test_send_erc20_simulation_revert_aborts(
+        self, connected_wallet, fake_mode, fake_rpc, monkeypatch
+    ):
+        """The critical safety test: if the chain says the tx would
+        revert, we must NOT broadcast. Burning gas on a guaranteed-
+        failed tx is what this whole layer exists to prevent."""
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.rpc import RpcError
+
+        td = MagicMock()
+        td.get.return_value = 6
+        td.get_strict.return_value = 6
+        monkeypatch.setattr(td_mod, "_instance", td)
+        fake_rpc.estimate_gas.side_effect = RpcError(
+            -32000,
+            "execution reverted: ERC20: transfer amount exceeds balance",
+            method="eth_estimateGas",
+        )
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "5",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "simulation_reverted"
+        body = out["content"][0]["text"]
+        assert "transfer amount exceeds balance" in body
+        # Critically: the wallet mode was NOT called
+        fake_mode.send_transaction.assert_not_called()
+
+    def test_send_native_simulation_revert_aborts(self, connected_wallet, fake_mode, fake_rpc):
+        """Native transfer simulation also catches reverts — primarily
+        insufficient-balance cases on the user's gas token."""
+        from clawmes.services.rpc import RpcError
+
+        fake_rpc.estimate_gas.side_effect = RpcError(
+            -32000,
+            "execution reverted: insufficient funds for gas * price + value",
+            method="eth_estimateGas",
+        )
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "simulation_reverted"
+        fake_mode.send_transaction.assert_not_called()
+
+    def test_send_native_estimate_network_error_proceeds(
+        self, connected_wallet, fake_mode, fake_rpc
+    ):
+        """Native transfer with a network-level estimateGas failure
+        proceeds — the user's tx may still mine; we don't block on
+        a flaky RPC."""
+        from clawmes.services.rpc import RpcError
+
+        fake_rpc.estimate_gas.side_effect = RpcError(
+            -32603, "connection reset", method="eth_estimateGas"
+        )
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        assert "isError" not in out
+        # Tx was actually broadcast
+        fake_mode.send_transaction.assert_called_once()
 
     def test_send_erc20_with_ens_recipient(
         self, connected_wallet, fake_mode, fake_rpc, monkeypatch
@@ -700,6 +798,41 @@ class TestEns:
         assert out["details"]["error_code"] == "ens_no_address"
         # Mode was never called — we bailed before signing
         fake_mode.send_transaction.assert_not_called()
+
+
+class TestRevertClassifier:
+    def test_revert_message_classified_as_revert(self):
+        from clawmes.services.rpc import RpcError
+        from clawmes.tools.transfer import _is_revert
+
+        for msg in (
+            "execution reverted",
+            "execution reverted: insufficient balance",
+            "VM Exception while processing transaction: revert",
+            "REVERTED",  # case-insensitive
+        ):
+            err = RpcError(-32000, msg, method="eth_estimateGas")
+            assert _is_revert(err), f"expected revert classification for: {msg!r}"
+
+    def test_network_message_not_classified_as_revert(self):
+        from clawmes.services.rpc import RpcError
+        from clawmes.tools.transfer import _is_revert
+
+        for msg in (
+            "connection reset by peer",
+            "request timed out",
+            "rate limit exceeded",
+            "internal server error",
+        ):
+            err = RpcError(-32603, msg, method="eth_estimateGas")
+            assert not _is_revert(err), f"unexpected revert classification for: {msg!r}"
+
+    def test_empty_message_not_revert(self):
+        from clawmes.services.rpc import RpcError
+        from clawmes.tools.transfer import _is_revert
+
+        err = RpcError(-32000, "", method="eth_estimateGas")
+        assert _is_revert(err) is False
 
 
 class TestRecipientHelper:

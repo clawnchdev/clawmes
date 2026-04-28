@@ -57,6 +57,20 @@ _ERC20_GAS_DEFAULT = 100_000
 # Native EVM transfer is fixed at 21000 gas — no estimation needed.
 _NATIVE_GAS = 21000
 
+
+class _SimulationReverted(Exception):
+    """Raised when ``eth_estimateGas`` reports the tx would revert.
+
+    Distinct from a network error: the chain itself rejected the
+    simulation, so broadcasting would burn gas for no effect. We
+    refuse rather than fall back.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 _SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -234,13 +248,22 @@ def _estimate_erc20(*, chain, token, to_addr, ens_name, amount) -> str:
 
     calldata = encode_transfer(to_addr, amount_base)
     state = get_wallet_state()
-    gas, gas_source = _estimate_gas_with_fallback(
-        from_addr=state.address if state.connected else None,
-        to=token,
-        data=calldata,
-        chain_id=chain.chain_id,
-        fallback=_ERC20_GAS_DEFAULT,
-    )
+    try:
+        gas, gas_source = _estimate_gas_with_fallback(
+            from_addr=state.address if state.connected else None,
+            to=token,
+            data=calldata,
+            chain_id=chain.chain_id,
+            fallback=_ERC20_GAS_DEFAULT,
+        )
+    except _SimulationReverted as exc:
+        return error_result(
+            f"Simulation reverted: {exc.reason}. The transfer would "
+            "fail on-chain — common causes are insufficient token "
+            "balance, transfer to the zero address, or a paused "
+            "token contract.",
+            code="simulation_reverted",
+        )
 
     details: dict[str, Any] = {
         "chain_id": chain.chain_id,
@@ -322,13 +345,22 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
         # encode_transfer already returns a 0x-prefixed string
         calldata = encode_transfer(to_addr, amount_base)
-        gas, gas_source = _estimate_gas_with_fallback(
-            from_addr=state.address,
-            to=token,
-            data=calldata,
-            chain_id=chain.chain_id,
-            fallback=_ERC20_GAS_DEFAULT,
-        )
+        try:
+            gas, gas_source = _estimate_gas_with_fallback(
+                from_addr=state.address,
+                to=token,
+                data=calldata,
+                chain_id=chain.chain_id,
+                fallback=_ERC20_GAS_DEFAULT,
+            )
+        except _SimulationReverted as exc:
+            return error_result(
+                f"Simulation reverted: {exc.reason}. Refusing to "
+                "broadcast — the tx would fail on-chain and burn your "
+                "gas. Common causes: insufficient token balance, "
+                "transfer to zero address, paused token contract.",
+                code="simulation_reverted",
+            )
         try:
             tx_hash = mode.send_transaction(
                 to=token,
@@ -356,6 +388,28 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             value_wei = to_base_units(amount, chain.native_decimals)
         except (ValueError, ArithmeticError) as exc:
             return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
+        # Simulate the native transfer (with the actual value) so
+        # insufficient-balance reverts catch us BEFORE we sign and
+        # broadcast a guaranteed-failed tx. We discard the gas number
+        # and stick with the EVM-fixed 21000 since native transfers
+        # always use exactly that.
+        try:
+            _estimate_gas_with_fallback(
+                from_addr=state.address,
+                to=to_addr,
+                value=value_wei,
+                data="0x",
+                chain_id=chain.chain_id,
+                fallback=_NATIVE_GAS,
+            )
+        except _SimulationReverted as exc:
+            return error_result(
+                f"Simulation reverted: {exc.reason}. Refusing to "
+                "broadcast — the tx would fail on-chain. Most common "
+                "cause for native transfers: not enough balance to "
+                "cover value + gas.",
+                code="simulation_reverted",
+            )
         try:
             tx_hash = mode.send_transaction(
                 to=to_addr,
@@ -505,17 +559,25 @@ def _estimate_gas_with_fallback(
     data: str,
     chain_id: int,
     fallback: int,
+    value: int = 0,
 ) -> tuple[int, str]:
-    """Try ``eth_estimateGas``; on failure, return ``fallback``.
+    """Try ``eth_estimateGas``; classify failures into revert vs network.
 
     Returns ``(gas, source)`` where ``source`` is ``"estimateGas"`` if
-    the RPC succeeded or ``"fallback"`` if we used the static ceiling.
-    The caller surfaces ``source`` in the tool result so the LLM /
-    user knows whether the gas figure is real or conservative.
+    the RPC succeeded or ``"fallback"`` if a non-revert error occurred
+    and we used the static ceiling.
+
+    Raises :class:`_SimulationReverted` if the simulation reverted —
+    the caller MUST refuse to broadcast in that case rather than fall
+    back to the static gas, because broadcasting would burn the user's
+    gas for a guaranteed-failed tx.
+
+    Network/timeout/RPC-unavailable errors fall back to the static
+    ceiling, since the user's tx may still succeed once connectivity
+    is restored or against a different RPC provider.
 
     A 25% headroom is added to the RPC estimate to absorb the small
-    difference between simulated and actual gas (most chains are
-    accurate to within a few percent; the buffer is cheap insurance).
+    difference between simulated and actual gas.
     """
     from clawmes.services.rpc import RpcError, get_rpc_service
 
@@ -523,12 +585,21 @@ def _estimate_gas_with_fallback(
         raw = get_rpc_service().estimate_gas(
             from_addr=from_addr,
             to=to,
+            value=value,
             data=data,
             chain_id=chain_id,
         )
     except RpcError as exc:
+        if _is_revert(exc):
+            _log.info(
+                "estimateGas reverted for %s on chain %d: %s",
+                to,
+                chain_id,
+                exc.message,
+            )
+            raise _SimulationReverted(exc.message) from exc
         _log.info(
-            "estimateGas failed for %s on chain %d (%s); using fallback %d",
+            "estimateGas RPC failed for %s on chain %d (%s); using fallback %d",
             to,
             chain_id,
             exc.message,
@@ -541,6 +612,26 @@ def _estimate_gas_with_fallback(
     # estimateGas response.
     with_headroom = (raw * 5) // 4
     return min(with_headroom, max(fallback, with_headroom)), "estimateGas"
+
+
+def _is_revert(exc) -> bool:
+    """Heuristic: did the simulation revert on-chain vs a network error?
+
+    EVM RPCs return revert errors with a few different codes/messages
+    depending on the provider:
+
+      * Geth / Alchemy: ``code=3, message="execution reverted"``,
+        sometimes with a decoded reason.
+      * Infura: ``code=-32000, message="execution reverted: <reason>"``.
+      * Anvil/Hardhat: ``code=-32603, message="VM Exception ... revert"``.
+      * Erigon: ``code=-32000, message="execution reverted"``.
+
+    We match on the message keyword "revert" — broad enough to catch
+    every RPC we've seen, narrow enough to not capture network errors
+    (which carry messages like "timed out", "connection reset", etc.).
+    """
+    msg = (exc.message or "").lower()
+    return "revert" in msg
 
 
 def _validate_token_address(token: str) -> str | None:
