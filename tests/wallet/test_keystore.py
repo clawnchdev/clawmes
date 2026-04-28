@@ -8,7 +8,11 @@ import types
 import pytest
 
 from clawmes.wallet.keystore import (
+    DKLEN,
     KEYRING_SERVICE,
+    SCRYPT_N,
+    SCRYPT_P,
+    SCRYPT_R,
     EncryptedKeystore,
     KeystoreError,
     address_from_mnemonic,
@@ -17,6 +21,7 @@ from clawmes.wallet.keystore import (
     encrypt_mnemonic,
     generate_mnemonic,
     load_keystore,
+    rotate_password,
     save_keystore,
 )
 
@@ -125,6 +130,181 @@ class TestRoundTrip:
         )
         with pytest.raises(KeystoreError, match="too short"):
             decrypt_mnemonic(b, "anything")
+
+
+class TestKdfCrossValidation:
+    """Verify our scrypt KDF matches the Python stdlib's reference
+    implementation. If the parameters or encoding ever drift, this
+    fails immediately rather than silently producing keystores that
+    can't be decrypted by other tools using the same scheme."""
+
+    def test_scrypt_matches_stdlib(self):
+        import hashlib
+
+        from clawmes.wallet.keystore import _derive_key
+
+        password = "hunter2"
+        salt = b"\x42" * 32
+
+        # Our impl (uses pycryptodome's scrypt internally)
+        ours = _derive_key(password, salt)
+
+        # Stdlib reference
+        # maxmem must be set for n=2^17 r=8 — defaults to 32 MB which
+        # is exactly the requirement at these parameters; bumping for
+        # safety.
+        reference = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt,
+            n=SCRYPT_N,
+            r=SCRYPT_R,
+            p=SCRYPT_P,
+            dklen=DKLEN,
+            maxmem=2**30,
+        )
+        assert ours == reference
+
+    def test_scrypt_parameters_meet_owasp(self):
+        # OWASP 2024 recommendation: N >= 2^17, r >= 8, p >= 1
+        assert SCRYPT_N >= 2**17
+        assert SCRYPT_R >= 8
+        assert SCRYPT_P >= 1
+        # 32-byte derived key for AES-256
+        assert DKLEN == 32
+
+
+class TestEncryptionInvariants:
+    """Properties that MUST hold for the construction to be safe."""
+
+    def test_unique_salt_per_encryption(self):
+        # Reusing salt with the same password produces the same key,
+        # which combined with reused nonce would let an attacker
+        # XOR ciphertexts. Verify each encrypt() generates fresh salt.
+        salts = {encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS).salt_hex for _ in range(20)}
+        assert len(salts) == 20  # all unique
+
+    def test_unique_nonce_per_encryption(self):
+        # AES-GCM is catastrophically broken under nonce reuse with
+        # the same key. With fresh salts (and thus fresh keys) reuse
+        # is fine, but we still want random nonces as defense in depth.
+        nonces = {encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS).nonce_hex for _ in range(20)}
+        assert len(nonces) == 20
+
+    def test_salt_size_32_bytes(self):
+        b = encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS)
+        assert len(bytes.fromhex(b.salt_hex)) == 32
+
+    def test_nonce_size_12_bytes(self):
+        b = encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS)
+        assert len(bytes.fromhex(b.nonce_hex)) == 12
+
+    def test_tag_authenticates_ciphertext(self):
+        """Tampered ciphertext must fail authentication."""
+        b = encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS)
+        ct = bytearray(bytes.fromhex(b.ciphertext_hex))
+        # Flip a byte in the middle of the ciphertext (not the tag)
+        ct[5] ^= 0xFF
+        tampered = EncryptedKeystore(
+            version=b.version,
+            address=b.address,
+            salt_hex=b.salt_hex,
+            nonce_hex=b.nonce_hex,
+            ciphertext_hex=ct.hex(),
+        )
+        with pytest.raises(KeystoreError, match="wrong password"):
+            decrypt_mnemonic(tampered, "pw")
+
+    def test_tag_authenticates_tag_itself(self):
+        """Tampered tag must fail authentication."""
+        b = encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS)
+        ct = bytearray(bytes.fromhex(b.ciphertext_hex))
+        # Flip the last byte (in the tag)
+        ct[-1] ^= 0xFF
+        tampered = EncryptedKeystore(
+            version=b.version,
+            address=b.address,
+            salt_hex=b.salt_hex,
+            nonce_hex=b.nonce_hex,
+            ciphertext_hex=ct.hex(),
+        )
+        with pytest.raises(KeystoreError, match="wrong password"):
+            decrypt_mnemonic(tampered, "pw")
+
+    def test_tampered_nonce_fails_authentication(self):
+        b = encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS)
+        bad_nonce = bytearray(bytes.fromhex(b.nonce_hex))
+        bad_nonce[0] ^= 0xFF
+        tampered = EncryptedKeystore(
+            version=b.version,
+            address=b.address,
+            salt_hex=b.salt_hex,
+            nonce_hex=bad_nonce.hex(),
+            ciphertext_hex=b.ciphertext_hex,
+        )
+        with pytest.raises(KeystoreError, match="wrong password"):
+            decrypt_mnemonic(tampered, "pw")
+
+    def test_tampered_salt_fails_authentication(self):
+        b = encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS)
+        bad_salt = bytearray(bytes.fromhex(b.salt_hex))
+        bad_salt[0] ^= 0xFF
+        tampered = EncryptedKeystore(
+            version=b.version,
+            address=b.address,
+            salt_hex=bad_salt.hex(),
+            nonce_hex=b.nonce_hex,
+            ciphertext_hex=b.ciphertext_hex,
+        )
+        # Different salt → different key → MAC fails
+        with pytest.raises(KeystoreError, match="wrong password"):
+            decrypt_mnemonic(tampered, "pw")
+
+    def test_round_trip_short_mnemonic(self):
+        # 12-word mnemonic — 128 bits of entropy
+        twelve_word = "test " * 11 + "junk"
+        b = encrypt_mnemonic(twelve_word, "pw", TEST_ADDRESS)
+        assert decrypt_mnemonic(b, "pw") == twelve_word
+
+    def test_round_trip_unicode_password(self):
+        # Unicode passwords must survive UTF-8 encoding round-trip
+        b = encrypt_mnemonic(TEST_MNEMONIC, "🔐 пароль 密码", TEST_ADDRESS)
+        assert decrypt_mnemonic(b, "🔐 пароль 密码") == TEST_MNEMONIC
+
+
+class TestRotatePassword:
+    def test_basic_rotation(self):
+        old = encrypt_mnemonic(TEST_MNEMONIC, "old-pw", TEST_ADDRESS)
+        new = rotate_password(old, "old-pw", "new-pw")
+        # New keystore decrypts with the new password
+        assert decrypt_mnemonic(new, "new-pw") == TEST_MNEMONIC
+        # And NOT with the old password
+        with pytest.raises(KeystoreError):
+            decrypt_mnemonic(new, "old-pw")
+        # Original keystore still decrypts with old password
+        assert decrypt_mnemonic(old, "old-pw") == TEST_MNEMONIC
+
+    def test_rotation_uses_fresh_salt_and_nonce(self):
+        old = encrypt_mnemonic(TEST_MNEMONIC, "old-pw", TEST_ADDRESS)
+        new = rotate_password(old, "old-pw", "new-pw")
+        assert new.salt_hex != old.salt_hex
+        assert new.nonce_hex != old.nonce_hex
+
+    def test_rotation_preserves_address(self):
+        old = encrypt_mnemonic(TEST_MNEMONIC, "old-pw", TEST_ADDRESS)
+        new = rotate_password(old, "old-pw", "new-pw")
+        assert new.address == TEST_ADDRESS
+
+    def test_rotation_with_wrong_old_password_raises(self):
+        old = encrypt_mnemonic(TEST_MNEMONIC, "real-pw", TEST_ADDRESS)
+        with pytest.raises(KeystoreError):
+            rotate_password(old, "wrong-pw", "new-pw")
+
+    def test_rotation_to_same_password_works(self):
+        # No technical reason to forbid this — produces a fresh salt+nonce
+        old = encrypt_mnemonic(TEST_MNEMONIC, "pw", TEST_ADDRESS)
+        new = rotate_password(old, "pw", "pw")
+        assert decrypt_mnemonic(new, "pw") == TEST_MNEMONIC
+        assert new.salt_hex != old.salt_hex
 
 
 # --- JSON serialization --------------------------------------------------

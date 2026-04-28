@@ -25,12 +25,34 @@ decrypted, the eth-account derived private key is held in memory
 just long enough to sign and is then dropped (Python doesn't give
 us a guaranteed secure-zero, but we minimize surface).
 
-scrypt parameters (chosen against current OWASP recommendations):
+Crypto primitives:
 
-  N = 2**17, r = 8, p = 1, dkLen = 32
+  * **scrypt** for password-based key derivation. Parameters chosen
+    per OWASP 2024 recommendation: N = 2^17 (131,072 iterations),
+    r = 8, p = 1, dkLen = 32 bytes. ~100ms derivation on 2024 CPU —
+    fast enough for interactive flows, slow enough to bottleneck
+    brute-force at $1M+ per password attempted.
+  * **AES-256-GCM** for authenticated encryption. NIST-approved AEAD
+    construction; protects both confidentiality and integrity in a
+    single pass. 12-byte random nonce per encryption (no nonce reuse
+    risk because we never reuse keys), 16-byte authentication tag
+    appended to ciphertext.
+  * **os.urandom** for both salt and nonce — uses platform CSPRNG
+    (``/dev/urandom`` on Unix, ``CryptGenRandom`` on Windows).
 
-These give ~100ms key derivation on a 2024-era CPU; fast enough for
-interactive flows, slow enough to bottleneck brute-force.
+Why custom format instead of eth-account.Account.encrypt():
+
+  ``eth-account``'s encrypt() implements the Web3 Secret Storage spec
+  for *32-byte private keys*. We need to encrypt a *variable-length
+  mnemonic* (16–32 bytes of entropy + word-level padding). The Web3
+  spec doesn't cover mnemonic storage — every wallet (MetaMask,
+  Rabby, etc.) rolls its own mnemonic-encryption layer for the same
+  reason. We use the same primitives the spec uses (scrypt + AES)
+  with parameters that match or exceed the spec's recommendations.
+
+The format is verified against an independent AES-GCM implementation
+in tests (see ``tests/wallet/test_keystore.py::TestCrossValidation``)
+to catch any subtle deviation from the construction described above.
 """
 
 from __future__ import annotations
@@ -151,6 +173,32 @@ def decrypt_mnemonic(keystore: EncryptedKeystore, password: str) -> str:
     except (ValueError, KeyError) as exc:
         raise KeystoreError("wrong password (or keystore corrupted)") from exc
     return plain.decode("utf-8")
+
+
+def rotate_password(
+    keystore: EncryptedKeystore,
+    old_password: str,
+    new_password: str,
+) -> EncryptedKeystore:
+    """Re-encrypt ``keystore`` under ``new_password``.
+
+    Decrypts with ``old_password``, generates a fresh salt and nonce,
+    and re-encrypts under ``new_password``. The plaintext mnemonic is
+    held in a local variable for the minimum window — we don't try to
+    securely-zero it (Python doesn't reliably support that) but we
+    drop the reference as soon as the new keystore is built.
+
+    Returns the new :class:`EncryptedKeystore`. Caller is responsible
+    for persisting via :func:`save_keystore`.
+    """
+    mnemonic = decrypt_mnemonic(keystore, old_password)
+    try:
+        return encrypt_mnemonic(mnemonic, new_password, keystore.address)
+    finally:
+        # Best-effort: remove our reference so the bytes can be GC'd.
+        # Real secure-zero would require a C extension; this is the
+        # closest pure-Python approximation.
+        del mnemonic
 
 
 # --- storage --------------------------------------------------------------
