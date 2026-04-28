@@ -120,6 +120,95 @@ class TestChainId:
         assert rpc.chain_id(8453) == 8453
 
 
+class TestGetTransactionCount:
+    def test_hex_response_uses_pending(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "0x7"})
+        n = rpc.get_transaction_count("0x" + "a" * 40, 8453)
+        assert n == 7
+        sent = fake_http.calls[0]["json"]
+        assert sent["method"] == "eth_getTransactionCount"
+        assert sent["params"] == ["0x" + "a" * 40, "pending"]
+
+    def test_int_response(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": 12})
+        assert rpc.get_transaction_count("0x" + "a" * 40, 8453) == 12
+
+    def test_explicit_block(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "0x0"})
+        rpc.get_transaction_count("0x" + "a" * 40, 8453, block="latest")
+        sent = fake_http.calls[0]["json"]
+        assert sent["params"][1] == "latest"
+
+
+class TestSendRawTransaction:
+    def test_basic(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "0x" + "f" * 64})
+        h = rpc.send_raw_transaction("0xdead", 8453)
+        assert h == "0x" + "f" * 64
+
+    def test_adds_0x_prefix(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "0x" + "f" * 64})
+        rpc.send_raw_transaction("dead", 8453)
+        sent = fake_http.calls[0]["json"]
+        assert sent["params"] == ["0xdead"]
+
+    def test_non_string_result_raises(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": 123})
+        with pytest.raises(RpcError) as exc_info:
+            rpc.send_raw_transaction("0xdead", 8453)
+        assert exc_info.value.code == -32700
+        assert exc_info.value.method == "eth_sendRawTransaction"
+
+
+class TestGetTransactionReceipt:
+    def test_pending_returns_none(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": None})
+        assert rpc.get_transaction_receipt("0x" + "f" * 64, 8453) is None
+
+    def test_mined_returns_dict(self, rpc, fake_http):
+        receipt = {"status": "0x1", "blockNumber": "0x123"}
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": receipt})
+        got = rpc.get_transaction_receipt("0x" + "f" * 64, 8453)
+        assert got == receipt
+
+    def test_unexpected_type_raises(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "not a receipt"})
+        with pytest.raises(RpcError) as exc_info:
+            rpc.get_transaction_receipt("0x" + "f" * 64, 8453)
+        assert exc_info.value.code == -32700
+
+
+class TestWaitForReceipt:
+    def test_returns_immediately_when_present(self, rpc, fake_http, monkeypatch):
+        receipt = {"status": "0x1"}
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": receipt})
+        monkeypatch.setattr("clawmes.services.rpc.time.sleep", lambda _: None)
+        got = rpc.wait_for_receipt("0x" + "f" * 64, 8453, timeout=1.0, poll_interval=0.01)
+        assert got == receipt
+
+    def test_polls_until_present(self, rpc, fake_http, monkeypatch):
+        receipt = {"status": "0x1"}
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": None})
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 2, "result": None})
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 3, "result": receipt})
+        monkeypatch.setattr("clawmes.services.rpc.time.sleep", lambda _: None)
+        got = rpc.wait_for_receipt("0x" + "f" * 64, 8453, timeout=10.0, poll_interval=0.01)
+        assert got == receipt
+        assert len(fake_http.calls) == 3
+
+    def test_times_out(self, rpc, fake_http, monkeypatch):
+        # Always-pending receipt; advance monotonic past the deadline on
+        # the second iteration so the loop exits cleanly.
+        clock = iter([0.0, 100.0])
+        monkeypatch.setattr("clawmes.services.rpc.time.monotonic", lambda: next(clock))
+        monkeypatch.setattr("clawmes.services.rpc.time.sleep", lambda _: None)
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": None})
+        with pytest.raises(RpcError) as exc_info:
+            rpc.wait_for_receipt("0x" + "f" * 64, 8453, timeout=5.0, poll_interval=0.01)
+        assert "timed out" in exc_info.value.message
+        assert exc_info.value.method == "eth_getTransactionReceipt"
+
+
 class TestErrorPaths:
     def test_unconfigured_chain(self, rpc):
         with pytest.raises(RpcError) as exc_info:

@@ -529,33 +529,49 @@ class TestLocalKeyMode:
         sig = hot_mode.sign_typed_data_v4(typed)
         assert len(sig) >= 130
 
-    def test_send_transaction_returns_signed_hex(self, hot_mode, monkeypatch):
-        # Mock RPC since send_transaction touches eth_call as a placeholder
+    def test_send_transaction_returns_tx_hash(self, hot_mode, monkeypatch):
         from clawmes.services import rpc as rpc_module
 
+        captured: dict[str, object] = {}
+
         class FakeRpc:
-            def eth_call(self, **kw):
-                return "0x0"
+            def get_transaction_count(self, address, chain_id, *, block="pending"):
+                captured["nonce_addr"] = address
+                captured["nonce_chain"] = chain_id
+                captured["nonce_block"] = block
+                return 7
+
+            def send_raw_transaction(self, raw_hex, chain_id):
+                captured["raw"] = raw_hex
+                captured["broadcast_chain"] = chain_id
+                return "0x" + "f" * 64
 
         monkeypatch.setattr(rpc_module, "_instance", FakeRpc())
-        raw = hot_mode.send_transaction(
+        tx_hash = hot_mode.send_transaction(
             to="0x" + "a" * 40,
             value=10**17,
             chain_id=8453,
         )
-        # eth-account returns raw signed tx as hex
-        assert isinstance(raw, str)
-        assert len(raw) > 50  # non-trivial RLP bytes
+        assert tx_hash == "0x" + "f" * 64
+        assert captured["nonce_chain"] == 8453
+        assert captured["nonce_block"] == "pending"
+        assert captured["broadcast_chain"] == 8453
+        # raw hex was passed through to broadcast
+        assert isinstance(captured["raw"], str)
+        assert len(captured["raw"]) > 50
 
     def test_send_transaction_with_data_string(self, hot_mode, monkeypatch):
         from clawmes.services import rpc as rpc_module
 
         class FakeRpc:
-            def eth_call(self, **kw):
-                return "0x0"
+            def get_transaction_count(self, address, chain_id, *, block="pending"):
+                return 0
+
+            def send_raw_transaction(self, raw_hex, chain_id):
+                return "0x" + "1" * 64
 
         monkeypatch.setattr(rpc_module, "_instance", FakeRpc())
-        raw = hot_mode.send_transaction(
+        tx_hash = hot_mode.send_transaction(
             to="0x" + "a" * 40,
             value=0,
             data="0xdeadbeef",
@@ -564,23 +580,26 @@ class TestLocalKeyMode:
             max_fee_per_gas=2 * 10**10,
             max_priority_fee_per_gas=2 * 10**9,
         )
-        assert isinstance(raw, str)
+        assert tx_hash == "0x" + "1" * 64
 
     def test_send_transaction_with_data_bytes(self, hot_mode, monkeypatch):
         from clawmes.services import rpc as rpc_module
 
         class FakeRpc:
-            def eth_call(self, **kw):
-                return "0x0"
+            def get_transaction_count(self, address, chain_id, *, block="pending"):
+                return 42
+
+            def send_raw_transaction(self, raw_hex, chain_id):
+                return "0x" + "2" * 64
 
         monkeypatch.setattr(rpc_module, "_instance", FakeRpc())
-        raw = hot_mode.send_transaction(
+        tx_hash = hot_mode.send_transaction(
             to="0x" + "a" * 40,
             value=0,
             data=b"\xab\xcd",
             chain_id=8453,
         )
-        assert isinstance(raw, str)
+        assert tx_hash == "0x" + "2" * 64
 
     def test_send_transaction_disconnected_raises(self):
         from clawmes.wallet.keystore import KeystoreError

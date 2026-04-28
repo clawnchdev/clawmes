@@ -177,7 +177,19 @@ class LocalKeyMode(WalletMode):
         max_fee_per_gas: int | None = None,
         max_priority_fee_per_gas: int | None = None,
     ) -> str:
-        """Sign and submit a transaction via the RPC service.
+        """Sign and submit a transaction via the RPC service; return the tx hash.
+
+        Flow:
+
+        1. Pull the current nonce via ``eth_getTransactionCount`` with
+           ``block="pending"`` so we account for any in-flight tx.
+        2. Build a type-2 (EIP-1559) tx, sign it locally with the
+           cached mnemonic-derived private key.
+        3. Broadcast via ``eth_sendRawTransaction`` and return the hash.
+
+        Receipt polling is the caller's responsibility — wire
+        :meth:`RpcService.wait_for_receipt` if you need to block until
+        mined.
 
         Requires the password cache to be hot (call ``connect`` with
         ``password_cache_seconds > 0`` first), otherwise raises
@@ -193,17 +205,7 @@ class LocalKeyMode(WalletMode):
         target_chain = chain_id or self._state.chain_id or 8453
         rpc = get_rpc_service()
 
-        nonce_hex = rpc.eth_call(
-            to=self._state.address,
-            data="0x",
-            chain_id=target_chain,
-        )  # noqa: F841 — placeholder; real impl uses eth_getTransactionCount
-        # NOTE: at this milestone we issue a synthetic nonce; the
-        # caller integration with eth_getTransactionCount lands in the
-        # follow-up that adds tx-receipt polling. For now this method
-        # signs and returns the raw signed-tx hex so it's testable
-        # end-to-end without a live chain.
-        del nonce_hex  # silences unused-variable lint
+        nonce = rpc.get_transaction_count(self._state.address, target_chain)
 
         from eth_account import Account
         from eth_utils import to_checksum_address
@@ -214,7 +216,7 @@ class LocalKeyMode(WalletMode):
             "gas": int(gas or 21000),
             "maxFeePerGas": int(max_fee_per_gas or 10**10),
             "maxPriorityFeePerGas": int(max_priority_fee_per_gas or 10**9),
-            "nonce": 0,
+            "nonce": int(nonce),
             "chainId": int(target_chain),
             "type": 2,
         }
@@ -222,7 +224,10 @@ class LocalKeyMode(WalletMode):
             tx["data"] = data if isinstance(data, str) else "0x" + data.hex()
 
         signed = Account.sign_transaction(tx, privkey)
-        return signed.raw_transaction.hex()
+        raw_hex = signed.raw_transaction.hex()
+        tx_hash = rpc.send_raw_transaction(raw_hex, target_chain)
+        _log.info("local wallet broadcast tx %s on chain %d", tx_hash, target_chain)
+        return tx_hash
 
     def sign_typed_data_v4(self, typed_data: dict[str, Any]) -> str:
         from eth_account import Account
