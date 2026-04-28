@@ -12,13 +12,22 @@ from clawmes.wallet.state import WalletState
 
 
 @pytest.fixture(autouse=True)
-def _isolate_wallet(monkeypatch):
-    """Reset wallet + RPC singletons each test."""
+def _isolate_wallet(monkeypatch, tmp_path):
+    """Reset wallet + RPC singletons + clear policies each test.
+
+    Policy isolation matters here because the @write_tool gate runs
+    before _handle_send/_handle_estimate, and the default policies
+    (confirm_large_transfers > 0.05 ETH) would otherwise interrupt
+    every test that uses 'amount: 1' ETH-sized values.
+    """
+    from clawmes.policy import storage as policy_storage
     from clawmes.services import rpc as rpc_mod
     from clawmes.services import wallet as wallet_mod
 
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.setattr(wallet_mod, "_instance", None)
     monkeypatch.setattr(rpc_mod, "_instance", None)
+    policy_storage.save_policies([])
 
 
 @pytest.fixture
