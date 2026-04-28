@@ -87,6 +87,41 @@ class WalletService(Service):
             _log.exception("wallet mode state() raised; returning disconnected")
             return WalletState.disconnected()
 
+    def disconnect(self) -> WalletState:
+        """Tear down the active wallet session.
+
+        Captures the pre-disconnect state for the caller (so the
+        command layer can show "Disconnected from 0xabc... on Base")
+        then routes to the mode's ``disconnect``. The mode is best-
+        effort: an exception during disconnect is logged but does not
+        prevent the service from clearing its slot. After this returns
+        the service is back to ``WalletState.disconnected()``.
+
+        Returns the WalletState that was active *before* disconnect so
+        callers can render a confirmation message. If nothing was
+        connected, returns ``WalletState.disconnected()``.
+        """
+        with self._lock:
+            mode = self._mode
+        if mode is None:
+            return WalletState.disconnected()
+
+        try:
+            previous = mode.state()
+        except Exception:  # noqa: BLE001 — fall back to disconnected snapshot
+            _log.exception("wallet mode state() raised during disconnect")
+            previous = WalletState.disconnected()
+
+        try:
+            mode.disconnect()
+        except Exception:  # noqa: BLE001 — best-effort
+            _log.exception("wallet mode disconnect raised")
+
+        with self._lock:
+            self._mode = None
+        _log.info("wallet disconnected (was mode=%s)", previous.mode or "(none)")
+        return previous
+
     # --- Bankr convenience ----------------------------------------------
 
     def connect_bankr(self, *, chain_id: int = 8453) -> WalletState:

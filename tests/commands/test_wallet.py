@@ -142,16 +142,101 @@ class TestConnect:
         assert "WalletConnect bridge error" in out
 
     @pytest.mark.asyncio
-    async def test_disconnect_when_disconnected(self, disconnected_state):
-        with patch(_PATCH_PATH, return_value=disconnected_state):
-            out = await wallet_cmd.handle_disconnect("")
+    async def test_disconnect_when_disconnected(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        monkeypatch.setattr(svc, "disconnect", lambda: WalletState.disconnected())
+
+        out = await wallet_cmd.handle_disconnect("")
         assert "No active wallet session" in out
 
     @pytest.mark.asyncio
-    async def test_disconnect_when_connected(self, connected_state):
-        with patch(_PATCH_PATH, return_value=connected_state):
-            out = await wallet_cmd.handle_disconnect("")
-        assert "not yet implemented" in out
+    async def test_disconnect_walletconnect(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        previous = WalletState(
+            connected=True,
+            mode="walletconnect",
+            address="0x" + "a" * 40,
+            chain_id=8453,
+            chain_name="Base",
+        )
+        monkeypatch.setattr(svc, "disconnect", lambda: previous)
+
+        out = await wallet_cmd.handle_disconnect("")
+        assert "Disconnected WalletConnect session" in out
+        assert "Base" in out
+        # short-form address present
+        assert "0xaaaa…aaaa" in out or "0xaaaa" in out
+
+    @pytest.mark.asyncio
+    async def test_disconnect_local_key(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        previous = WalletState(
+            connected=True,
+            mode="local",
+            address="0x" + "b" * 40,
+            chain_id=8453,
+            chain_name="Base",
+        )
+        monkeypatch.setattr(svc, "disconnect", lambda: previous)
+
+        out = await wallet_cmd.handle_disconnect("")
+        assert "Disconnected local-key session" in out
+
+    @pytest.mark.asyncio
+    async def test_disconnect_bankr(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        previous = WalletState(
+            connected=True,
+            mode="bankr",
+            address="0x" + "c" * 40,
+            chain_id=8453,
+            chain_name="Base",
+        )
+        monkeypatch.setattr(svc, "disconnect", lambda: previous)
+
+        out = await wallet_cmd.handle_disconnect("")
+        assert "Disconnected Bankr session" in out
+
+    @pytest.mark.asyncio
+    async def test_disconnect_unknown_mode_falls_back(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        previous = WalletState(
+            connected=True,
+            mode="weird",
+            address="0x" + "d" * 40,
+            chain_id=999,
+            chain_name=None,
+        )
+        monkeypatch.setattr(svc, "disconnect", lambda: previous)
+
+        out = await wallet_cmd.handle_disconnect("")
+        assert "Disconnected wallet session" in out
+        assert "chain 999" in out
 
 
 class TestConnectBankr:

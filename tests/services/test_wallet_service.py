@@ -191,3 +191,51 @@ class TestConnectWalletConnect:
         assert svc.active_mode is not None
         # client.start was called (lifecycle handoff)
         fake_client.start.assert_called_once_with()
+
+
+class TestDisconnect:
+    def test_disconnect_when_no_mode_returns_disconnected(self):
+        svc = WalletService()
+        previous = svc.disconnect()
+        assert previous.connected is False
+        assert svc.active_mode is None
+
+    def test_disconnect_returns_previous_state_and_clears_mode(self):
+        svc = WalletService()
+        connected = WalletState.for_chain(
+            mode="local",
+            address="0x" + "a" * 40,
+            chain_id=8453,
+        )
+        mode = MagicMock()
+        mode.state.return_value = connected
+        svc.set_mode(mode)
+
+        previous = svc.disconnect()
+        assert previous == connected
+        assert svc.active_mode is None
+        mode.disconnect.assert_called_once_with()
+
+    def test_disconnect_swallows_mode_disconnect_failure(self):
+        svc = WalletService()
+        mode = MagicMock()
+        mode.state.return_value = WalletState.for_chain(
+            mode="walletconnect", address="0x" + "a" * 40, chain_id=8453
+        )
+        mode.disconnect.side_effect = RuntimeError("relay died")
+        svc.set_mode(mode)
+        # Must not propagate — partial cleanup is acceptable
+        previous = svc.disconnect()
+        assert previous.connected is True
+        assert svc.active_mode is None
+
+    def test_disconnect_swallows_state_failure(self):
+        svc = WalletService()
+        mode = MagicMock()
+        mode.state.side_effect = RuntimeError("state lookup blew up")
+        svc.set_mode(mode)
+        previous = svc.disconnect()
+        # state() raised → fell back to disconnected snapshot
+        assert previous.connected is False
+        assert svc.active_mode is None
+        mode.disconnect.assert_called_once_with()

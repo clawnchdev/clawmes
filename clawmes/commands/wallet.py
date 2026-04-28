@@ -79,10 +79,21 @@ async def handle_connect_bankr(raw_args: str) -> str:
 
 
 async def handle_disconnect(raw_args: str) -> str:
-    state = get_wallet_state()
-    if not state.connected:
+    from clawmes.services.wallet import get_wallet_service
+
+    svc = get_wallet_service()
+    previous = svc.disconnect()
+    if not previous.connected:
         return "No active wallet session."
-    return "Disconnect not yet implemented at this milestone."
+
+    addr_short = short(previous.address or "")
+    chain = previous.chain_name or f"chain {previous.chain_id}"
+    mode_label = {
+        "walletconnect": "WalletConnect session",
+        "local": "local-key session",
+        "bankr": "Bankr session",
+    }.get(previous.mode or "", "wallet session")
+    return f"Disconnected {mode_label} ({addr_short} on {chain})."
 
 
 async def handle_mode(raw_args: str) -> str:
