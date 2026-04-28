@@ -49,7 +49,7 @@ def fake_mode(monkeypatch):
 @pytest.fixture
 def fake_rpc(monkeypatch):
     """Install a fake RPC service whose wait_for_receipt returns a success
-    receipt by default."""
+    receipt by default and estimate_gas returns a clean ERC-20 estimate."""
     from clawmes.services import rpc as rpc_mod
 
     rpc = MagicMock()
@@ -58,6 +58,9 @@ def fake_rpc(monkeypatch):
         "blockNumber": "0x123",
         "gasUsed": "0x5208",  # 21000
     }
+    # Default to a successful estimate so transfer.send doesn't fall
+    # back to the static ceiling on the happy path.
+    rpc.estimate_gas.return_value = 50000
     monkeypatch.setattr(rpc_mod, "get_rpc_service", lambda: rpc)
     return rpc
 
@@ -89,7 +92,7 @@ class TestEstimate:
         assert "Base" in body
         assert "0.5" in body
 
-    def test_estimate_erc20_basic(self, connected_wallet, monkeypatch):
+    def test_estimate_erc20_basic(self, connected_wallet, monkeypatch, fake_rpc):
         from clawmes.services import token_decimals as td_mod
 
         td = MagicMock()
@@ -111,7 +114,70 @@ class TestEstimate:
         assert details["token"] == "0x" + "2" * 40
         assert details["token_decimals"] == 6
         assert details["amount_base_units"] == "100000000"
+        # Real estimate (50000 from fake_rpc) + 25% headroom
+        assert details["estimated_gas"] == 62500
+        assert details["gas_source"] == "estimateGas"
+
+    def test_estimate_erc20_fallback_when_estimate_fails(
+        self, connected_wallet, monkeypatch, fake_rpc
+    ):
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.rpc import RpcError
+
+        td = MagicMock()
+        td.get.return_value = 6
+        monkeypatch.setattr(td_mod, "_instance", td)
+        fake_rpc.estimate_gas.side_effect = RpcError(-32000, "reverted", method="eth_estimateGas")
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "100",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert "isError" not in out
+        details = out["details"]
         assert details["estimated_gas"] == 100_000
+        assert details["gas_source"] == "fallback"
+        body = out["content"][0]["text"]
+        assert "fallback ceiling" in body
+
+    def test_estimate_erc20_no_wallet(self, monkeypatch, fake_rpc):
+        # When estimating without a connected wallet, there's no from
+        # address to pass to estimateGas — we still try the call but
+        # without 'from'. The fake returns its default 50k.
+        from clawmes.services import token_decimals as td_mod
+
+        td = MagicMock()
+        td.get.return_value = 6
+        monkeypatch.setattr(td_mod, "_instance", td)
+        # Override get_wallet_state to disconnected so the estimate path
+        # exercises the no-wallet branch.
+        monkeypatch.setattr(
+            "clawmes.tools.transfer.get_wallet_state",
+            lambda: WalletState.disconnected(),
+        )
+        # We can't actually call transfer() here because the gate
+        # would fail with wallet_not_connected first — call the
+        # estimate helper directly to cover the no-from branch.
+        from clawmes.lib.chains import get_chain
+        from clawmes.tools.transfer import _estimate_erc20
+
+        result_str = _estimate_erc20(
+            chain=get_chain(8453),
+            token="0x" + "2" * 40,
+            to_addr="0x" + "1" * 40,
+            ens_name=None,
+            amount="10",
+        )
+        result = json.loads(result_str)
+        assert "isError" not in result
+        # estimateGas was called without 'from'
+        call = fake_rpc.estimate_gas.call_args
+        assert call.kwargs["from_addr"] is None
 
     def test_estimate_invalid_token_address(self, connected_wallet):
         out = json.loads(
@@ -305,14 +371,17 @@ class TestSendNative:
         assert details["status"] == "success"
         assert details["token"] == "0x" + "2" * 40
         assert details["amount_base_units"] == str(15 * 10**17)
-        # Mode received the calldata, value=0, gas=100k, to=token
+        # Mode received the calldata + estimate-based gas (50k * 1.25 = 62.5k)
         kwargs = fake_mode.send_transaction.call_args.kwargs
         assert kwargs["to"] == "0x" + "2" * 40
         assert kwargs["value"] == 0
-        assert kwargs["gas"] == 100_000
+        # Real estimate (50000) + 25% headroom = 62500
+        assert kwargs["gas"] == 62500
         assert kwargs["data"].startswith("0xa9059cbb")
         # Encoded recipient is the right-padded version of the to_addr
         assert "1" * 40 in kwargs["data"].lower()
+        # Result includes gas_source for observability
+        assert details["gas_source"] == "estimateGas"
 
     def test_send_erc20_invalid_token_address(self, connected_wallet, fake_mode):
         out = json.loads(
@@ -392,6 +461,39 @@ class TestSendNative:
         assert details["ens_name"] == "alice.eth"
         assert details["resolved_address"] == "0x" + "a" * 40
         assert details["to"] == "0x" + "a" * 40
+
+    def test_send_erc20_estimate_failure_uses_fallback(
+        self, connected_wallet, fake_mode, fake_rpc, monkeypatch
+    ):
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.rpc import RpcError
+
+        td = MagicMock()
+        td.get.return_value = 6
+        monkeypatch.setattr(td_mod, "_instance", td)
+        # Simulate estimateGas reverting (e.g. balance too low for the
+        # simulated tx). The tool should still proceed with the static
+        # fallback gas, since the user might have enough balance by the
+        # time the actual tx mines.
+        fake_rpc.estimate_gas.side_effect = RpcError(
+            -32000, "execution reverted: insufficient balance", method="eth_estimateGas"
+        )
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "5",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert "isError" not in out
+        details = out["details"]
+        assert details["gas_source"] == "fallback"
+        assert details["gas_limit"] == 100_000
+        kwargs = fake_mode.send_transaction.call_args.kwargs
+        assert kwargs["gas"] == 100_000
 
     def test_send_erc20_with_ens_recipient(
         self, connected_wallet, fake_mode, fake_rpc, monkeypatch

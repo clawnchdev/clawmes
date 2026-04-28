@@ -120,6 +120,65 @@ class TestChainId:
         assert rpc.chain_id(8453) == 8453
 
 
+class TestEstimateGas:
+    def test_basic(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "0x5208"})
+        gas = rpc.estimate_gas(
+            from_addr="0x" + "a" * 40,
+            to="0x" + "b" * 40,
+            chain_id=8453,
+        )
+        assert gas == 21000
+        sent = fake_http.calls[0]["json"]
+        assert sent["method"] == "eth_estimateGas"
+        params = sent["params"][0]
+        assert params["to"] == "0x" + "b" * 40
+        assert params["from"] == "0x" + "a" * 40
+        assert "value" not in params  # zero value omitted
+
+    def test_with_value(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "0x5208"})
+        rpc.estimate_gas(
+            from_addr="0x" + "a" * 40,
+            to="0x" + "b" * 40,
+            value=10**17,
+            chain_id=8453,
+        )
+        params = fake_http.calls[0]["json"]["params"][0]
+        assert params["value"] == hex(10**17)
+
+    def test_int_response(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": 50000})
+        gas = rpc.estimate_gas(
+            from_addr=None,
+            to="0x" + "b" * 40,
+            chain_id=8453,
+        )
+        assert gas == 50000
+
+    def test_no_from(self, rpc, fake_http):
+        fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "0x5208"})
+        rpc.estimate_gas(from_addr=None, to="0x" + "b" * 40, chain_id=8453)
+        params = fake_http.calls[0]["json"]["params"][0]
+        assert "from" not in params
+
+    def test_revert_propagates(self, rpc, fake_http):
+        fake_http.responses.append(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {"code": -32000, "message": "execution reverted: insufficient"},
+            }
+        )
+        with pytest.raises(RpcError) as exc_info:
+            rpc.estimate_gas(
+                from_addr="0x" + "a" * 40,
+                to="0x" + "b" * 40,
+                chain_id=8453,
+            )
+        assert "reverted" in exc_info.value.message
+
+
 class TestGetTransactionCount:
     def test_hex_response_uses_pending(self, rpc, fake_http):
         fake_http.responses.append({"jsonrpc": "2.0", "id": 1, "result": "0x7"})

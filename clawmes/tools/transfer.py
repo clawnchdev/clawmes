@@ -40,16 +40,22 @@ from clawmes.lib.chains import get_chain
 from clawmes.lib.decimals import to_base_units
 from clawmes.lib.ens import EnsError, is_ens_name
 from clawmes.lib.ens import resolve as resolve_ens
+from clawmes.lib.logger import logger_for
 from clawmes.lib.params import read_bool, read_str
 from clawmes.lib.tool_result import error_result, json_result
 from clawmes.services.wallet import get_wallet_state
 from clawmes.tools.registry import register_with_ctx, write_tool
 
-# Conservative ceiling for an ERC-20 ``transfer`` call. Real gas usage
-# is typically 50–65k for a non-first-touch transfer; 100k gives
+_log = logger_for("tools.transfer")
+
+# Fallback ceiling when ``eth_estimateGas`` fails or isn't available.
+# Real gas usage for a vanilla ERC-20 transfer is 50–65k; 100k gives
 # headroom for first-touch storage initialization without overpaying
-# wildly. Real estimation lands when ``eth_estimateGas`` is wired.
+# wildly.
 _ERC20_GAS_DEFAULT = 100_000
+
+# Native EVM transfer is fixed at 21000 gas — no estimation needed.
+_NATIVE_GAS = 21000
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -181,7 +187,7 @@ def _estimate_native(*, chain, to_addr, ens_name, amount) -> str:
     except (ValueError, ArithmeticError) as exc:
         return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
 
-    gas = 21000  # native transfer is always 21000 on EVM
+    gas = _NATIVE_GAS
     details: dict[str, Any] = {
         "chain_id": chain.chain_id,
         "chain": chain.name,
@@ -216,6 +222,16 @@ def _estimate_erc20(*, chain, token, to_addr, ens_name, amount) -> str:
     except (ValueError, ArithmeticError) as exc:
         return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
 
+    calldata = encode_transfer(to_addr, amount_base)
+    state = get_wallet_state()
+    gas, gas_source = _estimate_gas_with_fallback(
+        from_addr=state.address if state.connected else None,
+        to=token,
+        data=calldata,
+        chain_id=chain.chain_id,
+        fallback=_ERC20_GAS_DEFAULT,
+    )
+
     details: dict[str, Any] = {
         "chain_id": chain.chain_id,
         "chain": chain.name,
@@ -224,12 +240,14 @@ def _estimate_erc20(*, chain, token, to_addr, ens_name, amount) -> str:
         "amount_base_units": str(amount_base),
         "token": token,
         "token_decimals": decimals,
-        "estimated_gas": _ERC20_GAS_DEFAULT,
+        "estimated_gas": gas,
+        "gas_source": gas_source,
     }
     if ens_name is not None:
         details["ens_name"] = ens_name
         details["resolved_address"] = to_addr
     summary_target = f"{ens_name} ({to_addr})" if ens_name else to_addr
+    gas_note = "" if gas_source == "estimateGas" else " (fallback ceiling)"
     return json_result(
         details,
         summary=(
@@ -237,7 +255,7 @@ def _estimate_erc20(*, chain, token, to_addr, ens_name, amount) -> str:
             f"  Token:         {token} (decimals={decimals})\n"
             f"  To:            {summary_target}\n"
             f"  Amount:        {amount} ({amount_base} base units)\n"
-            f"  Estimated gas: {_ERC20_GAS_DEFAULT} (ceiling — actual ~50–65k)"
+            f"  Estimated gas: {gas}{gas_note}"
         ),
     )
 
@@ -284,12 +302,19 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
         # encode_transfer already returns a 0x-prefixed string
         calldata = encode_transfer(to_addr, amount_base)
+        gas, gas_source = _estimate_gas_with_fallback(
+            from_addr=state.address,
+            to=token,
+            data=calldata,
+            chain_id=chain.chain_id,
+            fallback=_ERC20_GAS_DEFAULT,
+        )
         try:
             tx_hash = mode.send_transaction(
                 to=token,
                 value=0,
                 data=calldata,
-                gas=_ERC20_GAS_DEFAULT,
+                gas=gas,
                 chain_id=chain.chain_id,
             )
         except Exception as exc:  # noqa: BLE001 — surface any signing/RPC error
@@ -303,6 +328,8 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             amount=amount,
             amount_base=amount_base,
             decimals=decimals,
+            gas=gas,
+            gas_source=gas_source,
         )
     else:
         try:
@@ -352,7 +379,19 @@ def _native_details(*, tx_hash, chain, to_addr, ens_name, amount, value_wei):
     return details
 
 
-def _erc20_details(*, tx_hash, chain, token, to_addr, ens_name, amount, amount_base, decimals):
+def _erc20_details(
+    *,
+    tx_hash,
+    chain,
+    token,
+    to_addr,
+    ens_name,
+    amount,
+    amount_base,
+    decimals,
+    gas,
+    gas_source,
+):
     explorer_url = f"{chain.block_explorer_url}/tx/{tx_hash}"
     details: dict[str, Any] = {
         "tx_hash": tx_hash,
@@ -364,6 +403,8 @@ def _erc20_details(*, tx_hash, chain, token, to_addr, ens_name, amount, amount_b
         "amount_base_units": str(amount_base),
         "token": token,
         "token_decimals": decimals,
+        "gas_limit": gas,
+        "gas_source": gas_source,
         "status": "pending",
     }
     if ens_name is not None:
@@ -435,6 +476,51 @@ def _finalize_send(
             f"View: {explorer_url}"
         )
     return json_result(base_details, summary=summary)
+
+
+def _estimate_gas_with_fallback(
+    *,
+    from_addr: str | None,
+    to: str,
+    data: str,
+    chain_id: int,
+    fallback: int,
+) -> tuple[int, str]:
+    """Try ``eth_estimateGas``; on failure, return ``fallback``.
+
+    Returns ``(gas, source)`` where ``source`` is ``"estimateGas"`` if
+    the RPC succeeded or ``"fallback"`` if we used the static ceiling.
+    The caller surfaces ``source`` in the tool result so the LLM /
+    user knows whether the gas figure is real or conservative.
+
+    A 25% headroom is added to the RPC estimate to absorb the small
+    difference between simulated and actual gas (most chains are
+    accurate to within a few percent; the buffer is cheap insurance).
+    """
+    from clawmes.services.rpc import RpcError, get_rpc_service
+
+    try:
+        raw = get_rpc_service().estimate_gas(
+            from_addr=from_addr,
+            to=to,
+            data=data,
+            chain_id=chain_id,
+        )
+    except RpcError as exc:
+        _log.info(
+            "estimateGas failed for %s on chain %d (%s); using fallback %d",
+            to,
+            chain_id,
+            exc.message,
+            fallback,
+        )
+        return fallback, "fallback"
+
+    # 25% headroom over the simulated estimate; cap at the fallback
+    # ceiling so we don't accidentally allow runaway gas on a buggy
+    # estimateGas response.
+    with_headroom = (raw * 5) // 4
+    return min(with_headroom, max(fallback, with_headroom)), "estimateGas"
 
 
 def _validate_token_address(token: str) -> str | None:

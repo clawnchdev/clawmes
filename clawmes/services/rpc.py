@@ -131,6 +131,33 @@ class RpcService(Service):
         result = self._call(chain_id, "eth_chainId", [])
         return int(result, 16) if isinstance(result, str) else int(result)
 
+    def estimate_gas(
+        self,
+        *,
+        from_addr: str | None,
+        to: str,
+        value: int = 0,
+        data: str = "0x",
+        chain_id: int,
+    ) -> int:
+        """Return ``eth_estimateGas`` for a hypothetical transaction.
+
+        The estimate is always an upper bound — actual gas used is
+        usually 5–15% lower. Callers that include their own buffer
+        should add it on top of this value.
+
+        Raises :class:`RpcError` when the simulated tx reverts or the
+        RPC fails. Tools that want a fallback should catch and use a
+        static ceiling instead.
+        """
+        tx: dict[str, Any] = {"to": to, "data": data}
+        if from_addr is not None:
+            tx["from"] = from_addr
+        if value:
+            tx["value"] = hex(int(value))
+        result = self._call(chain_id, "eth_estimateGas", [tx])
+        return int(result, 16) if isinstance(result, str) else int(result)
+
     def get_transaction_count(
         self,
         address: str,
