@@ -1,8 +1,7 @@
 """Tests for wallet mode implementations.
 
-WalletConnect mode is wired through the Node bridge and tested against
-a mock ``WalletConnectClient``. Local key and Bankr modes remain stubs
-at this milestone; their tests pin the NotImplementedError contract.
+WalletConnect and local-key modes are wired up; Bankr mode remains a
+stub.
 """
 
 from __future__ import annotations
@@ -19,51 +18,43 @@ from clawmes.wallet.local_key import KEYRING_SERVICE, LocalKeyMode
 from clawmes.wallet.state import WalletState
 from clawmes.wallet.walletconnect import WalletConnectMode, _to_hex
 
-# Stub-mode invariants (local + bankr) ------------------------------------
+# Bankr stub-mode invariants ----------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "mode_cls,kwargs",
-    [
-        (LocalKeyMode, {"password_cache_seconds": 0}),
-        (BankrMode, {"api_key": "test-key"}),
-    ],
-)
-class TestStubModes:
-    """Invariants for stub modes — connect/disconnect/state work; sign raises."""
+class TestBankrStub:
+    """Bankr mode is still a stub — sign methods raise NotImplementedError."""
 
-    def test_subclass_of_base(self, mode_cls, kwargs):
-        assert issubclass(mode_cls, WalletMode)
+    def test_subclass_of_base(self):
+        assert issubclass(BankrMode, WalletMode)
 
-    def test_name_set(self, mode_cls, kwargs):
-        m = mode_cls(**kwargs)
-        assert isinstance(m.name, str)
-        assert m.name
+    def test_name_set(self):
+        m = BankrMode()
+        assert m.name == "bankr"
 
-    def test_state_returns_wallet_state(self, mode_cls, kwargs):
-        m = mode_cls(**kwargs)
+    def test_state_returns_wallet_state(self):
+        m = BankrMode()
         s = m.state()
         assert isinstance(s, WalletState)
         assert s.connected is False
 
-    def test_connect_returns_state(self, mode_cls, kwargs):
-        m = mode_cls(**kwargs)
+    def test_connect_returns_state(self):
+        m = BankrMode()
         s = m.connect()
         assert isinstance(s, WalletState)
 
-    def test_disconnect_idempotent(self, mode_cls, kwargs):
-        m = mode_cls(**kwargs)
+    def test_disconnect_idempotent(self):
+        m = BankrMode()
         m.disconnect()
         m.disconnect()
         assert m.state().connected is False
 
-    def test_send_transaction_raises_not_implemented(self, mode_cls, kwargs):
-        m = mode_cls(**kwargs)
+    def test_send_transaction_raises_not_implemented(self):
+        m = BankrMode()
         with pytest.raises(NotImplementedError):
             m.send_transaction(to="0x" + "a" * 40, value=10**18)
 
-    def test_sign_typed_data_raises_not_implemented(self, mode_cls, kwargs):
-        m = mode_cls(**kwargs)
+    def test_sign_typed_data_raises_not_implemented(self):
+        m = BankrMode()
         with pytest.raises(NotImplementedError):
             m.sign_typed_data_v4({"types": {}})
 
@@ -272,11 +263,48 @@ class TestPersonalSignHelpers:
 
 
 class TestLocalKeyMode:
+    """LocalKeyMode is wired now; tests use a deterministic test mnemonic."""
+
+    TEST_MNEMONIC = (
+        "abandon abandon abandon abandon abandon abandon "
+        "abandon abandon abandon abandon abandon about"
+    )
+    TEST_ADDRESS = "0x9858EfFD232B4033E47d90003D41EC34EcaEda94"
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        # Replace keyring backend with an in-memory dict for the test
+
+        store: dict = {}
+
+        class FakeKeyring:
+            @staticmethod
+            def set_password(service, account, value):
+                store[(service, account)] = value
+
+            @staticmethod
+            def get_password(service, account):
+                return store.get((service, account))
+
+            @staticmethod
+            def delete_password(service, account):
+                store.pop((service, account), None)
+
+        # Inject the fake by patching every reference path
+        import sys
+        import types
+
+        fake_module = types.ModuleType("keyring")
+        fake_module.set_password = FakeKeyring.set_password
+        fake_module.get_password = FakeKeyring.get_password
+        fake_module.delete_password = FakeKeyring.delete_password
+        monkeypatch.setitem(sys.modules, "keyring", fake_module)
+
     def test_keyring_service_constant(self):
         assert KEYRING_SERVICE == "clawmes"
 
-    def test_keystore_path_under_hermes_home(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    def test_keystore_path_under_hermes_home(self, tmp_path):
         m = LocalKeyMode()
         path = m.keystore_path
         assert path.parent.parent.parent == tmp_path
@@ -290,9 +318,190 @@ class TestLocalKeyMode:
         m = LocalKeyMode(password_cache_seconds=300)
         assert m._password_cache_seconds == 300
 
-    def test_personal_sign_raises_not_implemented(self):
+    def test_connect_requires_password(self):
+        from clawmes.wallet.keystore import KeystoreError
+
         m = LocalKeyMode()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(KeystoreError, match="password is required"):
+            m.connect()
+
+    def test_connect_empty_password(self):
+        from clawmes.wallet.keystore import KeystoreError
+
+        m = LocalKeyMode()
+        with pytest.raises(KeystoreError, match="password is required"):
+            m.connect(password="")
+
+    def test_connect_no_keystore_raises(self):
+        from clawmes.wallet.keystore import KeystoreError
+
+        m = LocalKeyMode()
+        with pytest.raises(KeystoreError, match="no local keystore"):
+            m.connect(password="hunter2")
+
+    def test_connect_with_explicit_mnemonic(self):
+        m = LocalKeyMode()
+        state = m.connect(password="hunter2", mnemonic=self.TEST_MNEMONIC)
+        assert state.connected is True
+        assert state.mode == "local"
+        assert state.address == self.TEST_ADDRESS
+        assert state.balances["_mnemonic"] == self.TEST_MNEMONIC
+
+    def test_connect_generate_creates_random_mnemonic(self):
+        m = LocalKeyMode()
+        state = m.connect(password="hunter2", generate=True)
+        words = state.balances["_mnemonic"].split()
+        assert len(words) == 24  # 256-bit entropy
+        assert state.connected is True
+        assert state.address.startswith("0x")
+
+    def test_connect_then_load_with_password(self):
+        m = LocalKeyMode()
+        m.connect(password="hunter2", mnemonic=self.TEST_MNEMONIC)
+        # New mode instance loads the persisted keystore
+        m2 = LocalKeyMode()
+        state = m2.connect(password="hunter2")
+        assert state.address == self.TEST_ADDRESS
+
+    def test_load_wrong_password_raises(self):
+        from clawmes.wallet.keystore import KeystoreError
+
+        m = LocalKeyMode()
+        m.connect(password="hunter2", mnemonic=self.TEST_MNEMONIC)
+        m2 = LocalKeyMode()
+        with pytest.raises(KeystoreError, match="wrong password"):
+            m2.connect(password="wrong-password")
+
+    def test_invalid_mnemonic_import(self):
+        from clawmes.wallet.keystore import KeystoreError
+
+        m = LocalKeyMode()
+        with pytest.raises(KeystoreError, match="non-empty"):
+            m.connect(password="hunter2", mnemonic="")
+
+    def test_disconnect_clears(self):
+        m = LocalKeyMode(password_cache_seconds=60)
+        m.connect(password="hunter2", mnemonic=self.TEST_MNEMONIC)
+        m.disconnect()
+        assert m.state().connected is False
+        assert m._cached_mnemonic is None
+
+    # --- signing (with cache enabled) ---
+
+    @pytest.fixture
+    def hot_mode(self):
+        m = LocalKeyMode(password_cache_seconds=60)
+        m.connect(password="hunter2", mnemonic=self.TEST_MNEMONIC)
+        return m
+
+    def test_sign_personal_message_string(self, hot_mode):
+        sig = hot_mode.sign_personal_message("hello")
+        assert sig.startswith("0x") or len(sig) == 130
+        assert len(sig) >= 130  # 65 bytes hex
+
+    def test_sign_personal_message_bytes(self, hot_mode):
+        sig = hot_mode.sign_personal_message(b"hello")
+        assert len(sig) >= 130
+
+    def test_sign_typed_data_v4(self, hot_mode):
+        typed = {
+            "types": {
+                "EIP712Domain": [{"name": "name", "type": "string"}],
+                "Mail": [{"name": "from", "type": "string"}],
+            },
+            "primaryType": "Mail",
+            "domain": {"name": "Test"},
+            "message": {"from": "alice"},
+        }
+        sig = hot_mode.sign_typed_data_v4(typed)
+        assert len(sig) >= 130
+
+    def test_send_transaction_returns_signed_hex(self, hot_mode, monkeypatch):
+        # Mock RPC since send_transaction touches eth_call as a placeholder
+        from clawmes.services import rpc as rpc_module
+
+        class FakeRpc:
+            def eth_call(self, **kw):
+                return "0x0"
+
+        monkeypatch.setattr(rpc_module, "_instance", FakeRpc())
+        raw = hot_mode.send_transaction(
+            to="0x" + "a" * 40,
+            value=10**17,
+            chain_id=8453,
+        )
+        # eth-account returns raw signed tx as hex
+        assert isinstance(raw, str)
+        assert len(raw) > 50  # non-trivial RLP bytes
+
+    def test_send_transaction_with_data_string(self, hot_mode, monkeypatch):
+        from clawmes.services import rpc as rpc_module
+
+        class FakeRpc:
+            def eth_call(self, **kw):
+                return "0x0"
+
+        monkeypatch.setattr(rpc_module, "_instance", FakeRpc())
+        raw = hot_mode.send_transaction(
+            to="0x" + "a" * 40,
+            value=0,
+            data="0xdeadbeef",
+            chain_id=8453,
+            gas=50000,
+            max_fee_per_gas=2 * 10**10,
+            max_priority_fee_per_gas=2 * 10**9,
+        )
+        assert isinstance(raw, str)
+
+    def test_send_transaction_with_data_bytes(self, hot_mode, monkeypatch):
+        from clawmes.services import rpc as rpc_module
+
+        class FakeRpc:
+            def eth_call(self, **kw):
+                return "0x0"
+
+        monkeypatch.setattr(rpc_module, "_instance", FakeRpc())
+        raw = hot_mode.send_transaction(
+            to="0x" + "a" * 40,
+            value=0,
+            data=b"\xab\xcd",
+            chain_id=8453,
+        )
+        assert isinstance(raw, str)
+
+    def test_send_transaction_disconnected_raises(self):
+        from clawmes.wallet.keystore import KeystoreError
+
+        m = LocalKeyMode()
+        with pytest.raises(KeystoreError, match="not connected"):
+            m.send_transaction(to="0x" + "a" * 40, value=0)
+
+    def test_signing_without_cache_raises(self):
+        from clawmes.wallet.keystore import KeystoreError
+
+        # password_cache_seconds=0 (default) → cache empty after connect
+        m = LocalKeyMode()
+        m.connect(password="hunter2", mnemonic=self.TEST_MNEMONIC)
+        with pytest.raises(KeystoreError, match="cache expired or empty"):
+            m.sign_personal_message("hello")
+
+    def test_signing_after_cache_expiry(self, monkeypatch):
+        import time as _time
+
+        from clawmes.wallet.keystore import KeystoreError
+
+        m = LocalKeyMode(password_cache_seconds=1)
+        m.connect(password="hunter2", mnemonic=self.TEST_MNEMONIC)
+
+        # Fast-forward past cache TTL
+        real_monotonic = _time.monotonic
+        offset = [0.0]
+        monkeypatch.setattr(
+            "clawmes.wallet.local_key.time.monotonic",
+            lambda: real_monotonic() + offset[0],
+        )
+        offset[0] = 100.0
+        with pytest.raises(KeystoreError, match="cache expired"):
             m.sign_personal_message("hello")
 
 
