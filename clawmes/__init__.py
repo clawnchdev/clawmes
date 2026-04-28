@@ -12,6 +12,23 @@ use or to background threads started by ``services.start_all()``.
 
 from __future__ import annotations
 
+# When Hermes loads us via ``importlib.util.spec_from_file_location``
+# (e.g. ``hermes plugins install <git>`` path), the module name is a
+# namespaced ``hermes_plugins.clawmes`` rather than the bare
+# ``clawmes``. The rest of this package uses absolute imports
+# (``from clawmes.X import Y``) — without aliasing, those would fail
+# with ``cannot import name 'X' from 'clawmes' (unknown location)``.
+#
+# Aliasing here makes the namespaced module also reachable as
+# ``clawmes``, so subsequent absolute imports resolve to THIS same
+# module instance (no double-load, singletons stay singleton). When
+# loaded via ``pip install`` (canonical bare name from the start),
+# the alias check sees ``clawmes`` already present and skips.
+import sys as _sys
+
+if "clawmes" not in _sys.modules:
+    _sys.modules["clawmes"] = _sys.modules[__name__]
+
 import atexit
 import signal
 

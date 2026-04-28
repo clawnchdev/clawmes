@@ -125,6 +125,13 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# importlib mode: avoids package-collision when test files share a
+# basename across subdirectories (tests/services/test_registry.py and
+# tests/tools/test_registry.py). Combined with no `tests/__init__.py`,
+# this lets the repo root host an outer __init__.py shim for Hermes
+# plugin discovery without pytest mistaking `tests/` for a subpackage
+# of `clawmes`.
+addopts = "--import-mode=importlib"
 
 [tool.coverage.run]
 branch = false

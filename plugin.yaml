@@ -1,0 +1,52 @@
+name: clawmes
+version: 0.0.1
+description: Hermes Agent for crypto. Wallet, swaps, DeFi, launches, automation.
+author: Clawnch
+kind: standalone
+
+# Informational — the actual surface is registered programmatically in
+# register(ctx). This list is the source of truth for what users will see
+# in `hermes plugins list`, so it must match what register_all() actually
+# wires. Do not list tools that aren't implemented; the policy is "promise
+# only what ships." Additional tools land in subsequent versions and are
+# added here at the same time their register() function lands.
+provides_tools:
+  - clawnchconnect
+  - transfer
+  - defi_price
+  - defi_balance
+  - block_explorer
+
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_llm_call
+  - pre_gateway_dispatch
+  - on_session_start
+  - on_session_end
+  - on_session_finalize
+  - on_session_reset
+  - transform_terminal_output
+  - transform_tool_result
+  - subagent_stop
+
+# Optional — surfaced by hermes plugins install for interactive prompting.
+# Listed env vars are consumed by tools / services that are actually wired;
+# don't advertise env vars for unimplemented tools.
+requires_env:
+  - name: WALLETCONNECT_PROJECT_ID
+    description: WalletConnect Cloud project ID (required for WC mode)
+    url: https://cloud.walletconnect.com
+    secret: false
+  - name: BANKR_API_KEY
+    description: Bankr API key (required for Bankr custodial mode)
+    url: https://bankr.bot
+    secret: true
+  - name: ALCHEMY_API_KEY
+    description: Alchemy RPC key for EVM chains (recommended; demo endpoints rate-limit aggressively)
+    url: https://dashboard.alchemy.com
+    secret: true
+  - name: BASESCAN_API_KEY
+    description: Basescan API key (block_explorer tool)
+    url: https://basescan.org/myapikey
+    secret: true
