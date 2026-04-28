@@ -30,6 +30,8 @@ from typing import Any
 
 from clawmes.lib.chains import get_chain
 from clawmes.lib.decimals import to_base_units
+from clawmes.lib.ens import EnsError, is_ens_name
+from clawmes.lib.ens import resolve as resolve_ens
 from clawmes.lib.params import read_bool, read_str
 from clawmes.lib.tool_result import error_result, json_result
 from clawmes.services.wallet import get_wallet_state
@@ -45,7 +47,11 @@ _SCHEMA: dict[str, Any] = {
         },
         "to": {
             "type": "string",
-            "description": "Recipient address (ENS resolution not yet supported)",
+            "description": (
+                "Recipient address (0x...) or ENS name (e.g. vitalik.eth). "
+                "ENS names are resolved via Ethereum mainnet regardless of "
+                "the wallet's current chain."
+            ),
         },
         "amount": {
             "type": "string",
@@ -129,7 +135,7 @@ def _handle_estimate(args: dict[str, Any], state: Any) -> str:
             code="not_implemented",
         )
 
-    to = read_str(args, "to", required=True)
+    to_input = read_str(args, "to", required=True)
     amount = read_str(args, "amount", required=True)
     target_chain_id = _target_chain_id(args, state)
     chain = _lookup_chain(target_chain_id)
@@ -139,24 +145,35 @@ def _handle_estimate(args: dict[str, Any], state: Any) -> str:
             code="unsupported_chain",
         )
 
+    resolved = _resolve_recipient(to_input)
+    if isinstance(resolved, str):
+        # An error result was returned in place of a resolved address
+        return resolved
+    to_addr, ens_name = resolved
+
     try:
         value_wei = to_base_units(amount, chain.native_decimals)
     except (ValueError, ArithmeticError) as exc:
         return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
 
     gas = 21000  # native transfer is always 21000 on EVM
+    details: dict[str, Any] = {
+        "chain_id": chain.chain_id,
+        "chain": chain.name,
+        "to": to_addr,
+        "amount": amount,
+        "value_wei": str(value_wei),
+        "estimated_gas": gas,
+        "token": "native",
+    }
+    if ens_name is not None:
+        details["ens_name"] = ens_name
+        details["resolved_address"] = to_addr
+    summary_target = f"{ens_name} ({to_addr})" if ens_name else to_addr
     return json_result(
-        {
-            "chain_id": chain.chain_id,
-            "chain": chain.name,
-            "to": to,
-            "amount": amount,
-            "value_wei": str(value_wei),
-            "estimated_gas": gas,
-            "token": "native",
-        },
+        details,
         summary=(
-            f"Native {chain.native_symbol} transfer to {to} on {chain.name}\n"
+            f"Native {chain.native_symbol} transfer to {summary_target} on {chain.name}\n"
             f"  Amount:        {amount} {chain.native_symbol} ({value_wei} wei)\n"
             f"  Estimated gas: {gas}"
         ),
@@ -174,7 +191,7 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             code="not_implemented",
         )
 
-    to = read_str(args, "to", required=True)
+    to_input = read_str(args, "to", required=True)
     amount = read_str(args, "amount", required=True)
     await_receipt = read_bool(args, "await_receipt", default=True)
     target_chain_id = _target_chain_id(args, state)
@@ -184,6 +201,11 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             f"Unknown chain id {target_chain_id} — no native decimals known.",
             code="unsupported_chain",
         )
+
+    resolved = _resolve_recipient(to_input)
+    if isinstance(resolved, str):
+        return resolved
+    to_addr, ens_name = resolved
 
     try:
         value_wei = to_base_units(amount, chain.native_decimals)
@@ -203,7 +225,7 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
 
     try:
         tx_hash = mode.send_transaction(
-            to=to,
+            to=to_addr,
             value=value_wei,
             chain_id=chain.chain_id,
         )
@@ -216,12 +238,15 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
         "explorer_url": explorer_url,
         "chain_id": chain.chain_id,
         "chain": chain.name,
-        "to": to,
+        "to": to_addr,
         "amount": amount,
         "value_wei": str(value_wei),
         "token": "native",
         "status": "pending",
     }
+    if ens_name is not None:
+        base_details["ens_name"] = ens_name
+        base_details["resolved_address"] = to_addr
 
     if not await_receipt:
         return json_result(
@@ -275,6 +300,52 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             f"View: {explorer_url}"
         )
     return json_result(base_details, summary=summary)
+
+
+def _resolve_recipient(to_input: str) -> tuple[str, str | None] | str:
+    """Validate / resolve a transfer recipient.
+
+    Returns:
+        A ``(checksummed_address, ens_name_or_None)`` tuple on success.
+        A pre-rendered error result string on failure (the caller
+        bubbles this back to the LLM unchanged).
+
+    The checksum is best-effort — eth_utils is already in the wallet
+    dep tree, but if checksumming raises for any reason we return the
+    lowercase form so the tx still goes through.
+    """
+    if not to_input:
+        return error_result("Missing recipient address", code="param_error")
+
+    # Already a hex address — light validation only.
+    if to_input.startswith(("0x", "0X")):
+        if len(to_input) != 42:
+            return error_result(
+                f"Invalid address length: {to_input!r} (expected 42 chars)",
+                code="param_error",
+            )
+        try:
+            from eth_utils import to_checksum_address
+
+            return to_checksum_address(to_input), None
+        except Exception:  # noqa: BLE001 — eth_utils raises on bad hex
+            return error_result(f"Invalid address: {to_input!r}", code="param_error")
+
+    # Looks like an ENS name — resolve via mainnet.
+    if is_ens_name(to_input):
+        try:
+            resolved = resolve_ens(to_input)
+        except EnsError as exc:
+            return error_result(
+                f"Could not resolve {to_input!r}: {exc.message}",
+                code=f"ens_{exc.code}",
+            )
+        return resolved, to_input
+
+    return error_result(
+        f"Recipient {to_input!r} is neither a 0x address nor an ENS name.",
+        code="param_error",
+    )
 
 
 def _target_chain_id(args: dict[str, Any], state: Any) -> int:

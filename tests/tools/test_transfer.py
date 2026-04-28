@@ -282,6 +282,87 @@ class TestUnknownAction:
         assert out["details"]["error_code"] == "invalid_action"
 
 
+class TestEns:
+    def test_invalid_address_length(self, connected_wallet):
+        out = json.loads(transfer({"action": "estimate", "to": "0xabc", "amount": "1"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_invalid_address_garbled(self, connected_wallet):
+        out = json.loads(transfer({"action": "estimate", "to": "0x" + "z" * 40, "amount": "1"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_no_dot_no_0x_rejected(self, connected_wallet):
+        out = json.loads(transfer({"action": "estimate", "to": "vitalik", "amount": "1"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_estimate_resolves_ens(self, connected_wallet, monkeypatch):
+        from clawmes.tools import transfer as transfer_mod
+
+        monkeypatch.setattr(transfer_mod, "resolve_ens", lambda name: "0x" + "a" * 40)
+        out = json.loads(transfer({"action": "estimate", "to": "vitalik.eth", "amount": "0.1"}))
+        assert "isError" not in out
+        details = out["details"]
+        assert details["to"] == "0x" + "a" * 40
+        assert details["ens_name"] == "vitalik.eth"
+        assert details["resolved_address"] == "0x" + "a" * 40
+        body = out["content"][0]["text"]
+        assert "vitalik.eth" in body
+        assert "0x" + "a" * 40 in body
+
+    def test_estimate_ens_not_registered(self, connected_wallet, monkeypatch):
+        from clawmes.lib.ens import EnsError
+        from clawmes.tools import transfer as transfer_mod
+
+        def boom(name):
+            raise EnsError("not_registered", "no resolver")
+
+        monkeypatch.setattr(transfer_mod, "resolve_ens", boom)
+        out = json.loads(transfer({"action": "estimate", "to": "ghost.eth", "amount": "1"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "ens_not_registered"
+
+    def test_send_resolves_ens(self, connected_wallet, fake_mode, fake_rpc, monkeypatch):
+        from clawmes.tools import transfer as transfer_mod
+
+        monkeypatch.setattr(transfer_mod, "resolve_ens", lambda name: "0x" + "b" * 40)
+        out = json.loads(transfer({"action": "send", "to": "alice.eth", "amount": "0.01"}))
+        assert "isError" not in out
+        details = out["details"]
+        assert details["to"] == "0x" + "b" * 40
+        assert details["ens_name"] == "alice.eth"
+        assert details["resolved_address"] == "0x" + "b" * 40
+        # The mode received the resolved address, not the ENS name
+        kwargs = fake_mode.send_transaction.call_args.kwargs
+        assert kwargs["to"] == "0x" + "b" * 40
+
+    def test_send_ens_no_address(self, connected_wallet, fake_mode, fake_rpc, monkeypatch):
+        from clawmes.lib.ens import EnsError
+        from clawmes.tools import transfer as transfer_mod
+
+        def boom(name):
+            raise EnsError("no_address", "registered without addr")
+
+        monkeypatch.setattr(transfer_mod, "resolve_ens", boom)
+        out = json.loads(transfer({"action": "send", "to": "empty.eth", "amount": "0.01"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "ens_no_address"
+        # Mode was never called — we bailed before signing
+        fake_mode.send_transaction.assert_not_called()
+
+
+class TestRecipientHelper:
+    def test_empty_input(self):
+        from clawmes.tools.transfer import _resolve_recipient
+
+        result = _resolve_recipient("")
+        assert isinstance(result, str)
+        out = json.loads(result)
+        assert out["details"]["error_code"] == "param_error"
+
+
 class TestTargetChainFallback:
     def test_state_chain_id_none_defaults_8453(self, monkeypatch, fake_mode, fake_rpc):
         # Connected but no chain_id on the state — fall back to Base.
