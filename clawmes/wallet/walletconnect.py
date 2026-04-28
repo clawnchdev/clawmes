@@ -148,6 +148,44 @@ class WalletConnectMode(WalletMode):
             params=[msg_hex, addr],
         )
 
+    def switch_chain(self, chain_id: int) -> WalletState:
+        """Request the user's wallet switch chains via the bridge.
+
+        WalletConnect's ``wallet_switchEthereumChain`` is a request
+        the wallet may reject (e.g. the chain isn't enabled). The
+        bridge returns a bool — if False, we surface a RuntimeError
+        so the command layer can tell the user to add the chain
+        manually in their wallet first.
+        """
+        if self._client is None or self._active_topic is None:
+            raise RuntimeError("no active WalletConnect session — call connect() first")
+
+        from clawmes.lib.chains import get_chain
+
+        ok = self._client.switch_chain(chain_id)
+        if not ok:
+            raise RuntimeError(
+                f"wallet rejected chain switch to {chain_id} — "
+                "add the chain in your wallet and try again"
+            )
+
+        try:
+            chain_name = get_chain(chain_id).name
+        except KeyError:
+            chain_name = f"chain {chain_id}"
+
+        self._state = WalletState(
+            connected=True,
+            mode="walletconnect",
+            address=self._state.address,
+            chain_id=chain_id,
+            chain_name=chain_name,
+            balances=self._state.balances,
+            policy_names=self._state.policy_names,
+        )
+        _log.info("WC switched to %s (chain id %d)", chain_name, chain_id)
+        return self._state
+
     # --- notification handler -----------------------------------------
 
     def _apply_session(self, *, address: str, chain_id: int) -> None:

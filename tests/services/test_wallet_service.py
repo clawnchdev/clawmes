@@ -193,6 +193,45 @@ class TestConnectWalletConnect:
         fake_client.start.assert_called_once_with()
 
 
+class TestSwitchChain:
+    def test_no_mode_raises_config_error(self):
+        from clawmes.services.wallet import WalletConfigError
+
+        svc = WalletService()
+        with pytest.raises(WalletConfigError, match="No wallet connected"):
+            svc.switch_chain(1)
+
+    def test_unknown_chain_raises_config_error(self):
+        from clawmes.services.wallet import WalletConfigError
+
+        svc = WalletService()
+        svc.set_mode(MagicMock())
+        with pytest.raises(WalletConfigError):
+            svc.switch_chain("mars")
+
+    def test_routes_to_mode(self):
+        svc = WalletService()
+        mode = MagicMock()
+        mode.switch_chain.return_value = WalletState.for_chain(
+            mode="local", address="0x" + "a" * 40, chain_id=1
+        )
+        svc.set_mode(mode)
+        new_state = svc.switch_chain(1)
+        mode.switch_chain.assert_called_once_with(1)
+        assert new_state.chain_id == 1
+
+    def test_resolves_name(self):
+        svc = WalletService()
+        mode = MagicMock()
+        mode.switch_chain.return_value = WalletState.for_chain(
+            mode="local", address="0x" + "a" * 40, chain_id=1
+        )
+        svc.set_mode(mode)
+        svc.switch_chain("ethereum")
+        # Name resolved to id 1 before reaching the mode
+        mode.switch_chain.assert_called_once_with(1)
+
+
 class TestDisconnect:
     def test_disconnect_when_no_mode_returns_disconnected(self):
         svc = WalletService()

@@ -238,6 +238,35 @@ class LocalKeyMode(WalletMode):
         signed = Account.sign_message(signable, private_key=privkey)
         return signed.signature.hex()
 
+    def switch_chain(self, chain_id: int) -> WalletState:
+        """Update the active chain.
+
+        Local-key has no session state on the user's end and signs
+        per-chain at send time, so a chain switch is a pure metadata
+        update. The mnemonic/key derivation is unchanged.
+        """
+        if not self._state.connected:
+            raise KeystoreError("local wallet not connected")
+
+        from clawmes.lib.chains import get_chain
+
+        try:
+            chain_name = get_chain(chain_id).name
+        except KeyError:
+            chain_name = f"chain {chain_id}"
+
+        self._state = WalletState(
+            connected=True,
+            mode="local",
+            address=self._state.address,
+            chain_id=chain_id,
+            chain_name=chain_name,
+            balances=self._state.balances,
+            policy_names=self._state.policy_names,
+        )
+        _log.info("local wallet switched to %s (chain id %d)", chain_name, chain_id)
+        return self._state
+
     def sign_personal_message(self, message: bytes | str) -> str:
         from eth_account import Account
         from eth_account.messages import encode_defunct

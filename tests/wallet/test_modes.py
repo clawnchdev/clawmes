@@ -645,3 +645,149 @@ class TestBankrMode:
     def test_no_api_key(self):
         m = BankrMode()
         assert m._api_key is None
+
+
+class TestBankrSwitchChain:
+    @pytest.fixture(autouse=True)
+    def _isolate(self, monkeypatch):
+        from clawmes.services import bankr_service as bs_mod
+
+        fake = MagicMock()
+        fake.get_account.return_value = {
+            "addresses": {"1": "0x" + "a" * 40, "8453": "0x" + "b" * 40},
+        }
+        monkeypatch.setattr(bs_mod, "_instance", fake)
+        return fake
+
+    def test_when_disconnected_raises(self, _isolate):
+        from clawmes.services.bankr_service import BankrError
+
+        m = BankrMode()
+        with pytest.raises(BankrError) as exc_info:
+            m.switch_chain(1)
+        assert exc_info.value.code == "not_connected"
+
+    def test_switches_address_for_new_chain(self, _isolate):
+        m = BankrMode()
+        m.connect(chain_id=8453)
+        new_state = m.switch_chain(1)
+        assert new_state.chain_id == 1
+        assert new_state.address == "0x" + "a" * 40
+        assert new_state.chain_name == "Ethereum Mainnet"
+
+    def test_no_address_raises(self, _isolate):
+        m = BankrMode()
+        m.connect(chain_id=8453)
+        # The next get_account call returns no address for chain 137
+        _isolate.get_account.return_value = {"addresses": {"8453": "0x" + "b" * 40}}
+        from clawmes.services.bankr_service import BankrError
+
+        with pytest.raises(BankrError) as exc_info:
+            m.switch_chain(137)
+        assert exc_info.value.code == "no_address"
+
+    def test_unknown_chain_uses_fallback_name(self, _isolate):
+        m = BankrMode()
+        m.connect(chain_id=8453)
+        _isolate.get_account.return_value = {
+            "addresses": {"999999": "0x" + "c" * 40, "8453": "0x" + "b" * 40},
+        }
+        new_state = m.switch_chain(999999)
+        assert new_state.chain_id == 999999
+        assert new_state.chain_name == "chain 999999"
+
+
+class TestLocalKeySwitchChain:
+    @pytest.fixture
+    def connected_local(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        m = LocalKeyMode(password_cache_seconds=0)
+        # Build a state directly to skip BIP-39 + scrypt for speed
+        m._state = WalletState(
+            connected=True,
+            mode="local",
+            address="0x" + "a" * 40,
+            chain_id=8453,
+            chain_name="Base",
+        )
+        return m
+
+    def test_when_disconnected_raises(self):
+        from clawmes.wallet.keystore import KeystoreError
+
+        m = LocalKeyMode()
+        with pytest.raises(KeystoreError, match="not connected"):
+            m.switch_chain(1)
+
+    def test_metadata_only(self, connected_local):
+        new_state = connected_local.switch_chain(1)
+        assert new_state.chain_id == 1
+        assert new_state.chain_name == "Ethereum Mainnet"
+        assert new_state.address == "0x" + "a" * 40
+        # Mode/connected stay the same
+        assert new_state.mode == "local"
+        assert new_state.connected is True
+
+    def test_unknown_chain_uses_fallback_name(self, connected_local):
+        new_state = connected_local.switch_chain(999999)
+        assert new_state.chain_name == "chain 999999"
+
+
+class TestWalletConnectSwitchChain:
+    def test_when_no_client_raises(self):
+        m = WalletConnectMode()
+        with pytest.raises(RuntimeError, match="no active WalletConnect"):
+            m.switch_chain(1)
+
+    def test_when_no_topic_raises(self):
+        # Has client but never paired
+        client = MagicMock()
+        m = WalletConnectMode(client=client)
+        with pytest.raises(RuntimeError, match="no active WalletConnect"):
+            m.switch_chain(1)
+
+    def test_happy_path_updates_state(self):
+        client = MagicMock()
+        client.switch_chain.return_value = True
+        m = WalletConnectMode(client=client)
+        m._active_topic = "topic-123"
+        m._state = WalletState(
+            connected=True,
+            mode="walletconnect",
+            address="0x" + "a" * 40,
+            chain_id=8453,
+            chain_name="Base",
+        )
+        new_state = m.switch_chain(1)
+        client.switch_chain.assert_called_once_with(1)
+        assert new_state.chain_id == 1
+        assert new_state.chain_name == "Ethereum Mainnet"
+        assert new_state.address == "0x" + "a" * 40
+
+    def test_wallet_rejects(self):
+        client = MagicMock()
+        client.switch_chain.return_value = False
+        m = WalletConnectMode(client=client)
+        m._active_topic = "topic-123"
+        m._state = WalletState(
+            connected=True,
+            mode="walletconnect",
+            address="0x" + "a" * 40,
+            chain_id=8453,
+        )
+        with pytest.raises(RuntimeError, match="wallet rejected"):
+            m.switch_chain(1)
+
+    def test_unknown_chain_uses_fallback_name(self):
+        client = MagicMock()
+        client.switch_chain.return_value = True
+        m = WalletConnectMode(client=client)
+        m._active_topic = "topic-123"
+        m._state = WalletState(
+            connected=True,
+            mode="walletconnect",
+            address="0x" + "a" * 40,
+            chain_id=8453,
+        )
+        new_state = m.switch_chain(999999)
+        assert new_state.chain_name == "chain 999999"

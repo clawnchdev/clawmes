@@ -57,3 +57,19 @@ class WalletMode(ABC):
     def sign_personal_message(self, message: bytes | str) -> str:
         """``personal_sign`` — most modes implement; default raises."""
         raise NotImplementedError(f"{self.name} does not support personal_sign")
+
+    @abstractmethod
+    def switch_chain(self, chain_id: int) -> WalletState:
+        """Switch the active chain.
+
+        Each mode implements differently:
+          * WalletConnect — relays the switch to the user's phone via
+            the bridge.
+          * LocalKey      — pure metadata update (no session anywhere).
+          * Bankr         — re-pulls the address map and picks the
+            address for the new chain.
+
+        Returns the resulting WalletState. Raises if the switch can't
+        be applied (wallet not connected, chain unsupported, user
+        rejects on the phone, etc.).
+        """

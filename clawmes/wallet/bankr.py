@@ -123,3 +123,43 @@ class BankrMode(WalletMode):
             message,
             chain_id=self._state.chain_id,
         )
+
+    def switch_chain(self, chain_id: int) -> WalletState:
+        """Switch chains by re-pulling the address map and picking
+        the address for ``chain_id``.
+
+        Bankr keeps a separate address per chain. We re-fetch every
+        time rather than caching: the user could have added a chain
+        on the Bankr web UI between the original connect and this
+        switch, and we'd otherwise see a stale ``no_address`` error.
+        """
+        if not self._state.connected:
+            raise BankrError("not_connected", "Bankr wallet not connected")
+
+        account = get_bankr_service().get_account()
+        addresses = account.get("addresses") or {}
+        address = addresses.get(str(chain_id)) or addresses.get(chain_id)
+        if not isinstance(address, str) or not address:
+            raise BankrError(
+                "no_address",
+                f"Bankr account has no address for chain {chain_id}",
+            )
+
+        from clawmes.lib.chains import get_chain
+
+        try:
+            chain_name = get_chain(chain_id).name
+        except KeyError:
+            chain_name = f"chain {chain_id}"
+
+        self._state = WalletState(
+            connected=True,
+            mode="bankr",
+            address=address,
+            chain_id=chain_id,
+            chain_name=chain_name,
+            balances=self._state.balances,
+            policy_names=self._state.policy_names,
+        )
+        _log.info("bankr wallet switched to %s on %s", address, chain_name)
+        return self._state

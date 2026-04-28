@@ -98,14 +98,22 @@ async def handle_disconnect(raw_args: str) -> str:
 
 async def handle_mode(raw_args: str) -> str:
     requested = raw_args.strip().lower()
+    state = get_wallet_state()
     if not requested:
-        state = get_wallet_state()
         return f"Current wallet mode: {state.mode or '(not configured)'}"
     if requested not in ("walletconnect", "local", "bankr"):
         return f"Unknown mode {requested!r}. Choose one of: walletconnect, local, bankr."
+    if state.mode == requested:
+        return f"Already in {requested!r} mode."
+
+    connect_cmd = {
+        "walletconnect": "/connect",
+        "local": "/connect_local",
+        "bankr": "/connect_bankr",
+    }[requested]
     return (
-        f"Switching to {requested!r} mode is not yet implemented at this "
-        "milestone. Run `hermes clawmes init` to reconfigure."
+        f"Switching to {requested!r} mode requires reconnecting. "
+        f"Run `/disconnect` then `{connect_cmd}` to switch."
     )
 
 
@@ -114,7 +122,28 @@ async def handle_chain(raw_args: str) -> str:
     if not arg:
         state = get_wallet_state()
         return f"Current chain: {state.chain_name or '(none)'} (id {state.chain_id})"
-    return "Chain switching not yet implemented at this milestone."
+
+    from clawmes.services.wallet import WalletConfigError, get_wallet_service
+
+    # Allow either an integer id ("1") or a name ("ethereum").
+    target: int | str
+    try:
+        target = int(arg)
+    except ValueError:
+        target = arg
+
+    svc = get_wallet_service()
+    try:
+        new_state = svc.switch_chain(target)
+    except WalletConfigError as exc:
+        return f"Cannot switch chain: {exc}"
+    except Exception as exc:  # noqa: BLE001 — mode-specific errors surfaced verbatim
+        return f"Chain switch failed: {exc}"
+
+    return (
+        f"Switched to {new_state.chain_name} (id {new_state.chain_id}). "
+        f"Address: {new_state.address}"
+    )
 
 
 async def handle_address(raw_args: str) -> str:

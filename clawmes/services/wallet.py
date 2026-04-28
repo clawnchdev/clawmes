@@ -87,6 +87,31 @@ class WalletService(Service):
             _log.exception("wallet mode state() raised; returning disconnected")
             return WalletState.disconnected()
 
+    def switch_chain(self, chain_id_or_name: int | str) -> WalletState:
+        """Switch the active chain on the connected wallet.
+
+        Resolves ``chain_id_or_name`` via :func:`clawmes.lib.chains.get_chain`
+        so callers can pass ``1``, ``"ethereum"``, or ``"Ethereum Mainnet"``.
+        Then routes to the active mode's ``switch_chain``.
+
+        Raises :class:`WalletConfigError` if no wallet is connected (so the
+        command layer surfaces a clean message instead of an opaque error
+        from the underlying mode).
+        """
+        from clawmes.lib.chains import get_chain
+
+        with self._lock:
+            mode = self._mode
+        if mode is None:
+            raise WalletConfigError("No wallet connected — run /connect first.")
+
+        try:
+            chain = get_chain(chain_id_or_name)
+        except KeyError as exc:
+            raise WalletConfigError(str(exc)) from exc
+
+        return mode.switch_chain(chain.chain_id)
+
     def disconnect(self) -> WalletState:
         """Tear down the active wallet session.
 

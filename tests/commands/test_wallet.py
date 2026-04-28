@@ -320,24 +320,36 @@ class TestMode:
         assert "walletconnect" in out  # lists valid choices
 
     @pytest.mark.asyncio
-    async def test_valid_mode_change_stubbed(self):
-        out = await wallet_cmd.handle_mode("walletconnect")
-        assert "not yet implemented" in out
+    async def test_valid_mode_walletconnect_when_disconnected(self, disconnected_state):
+        with patch("clawmes.commands.wallet.get_wallet_state", return_value=disconnected_state):
+            out = await wallet_cmd.handle_mode("walletconnect")
+        assert "/disconnect" in out
+        assert "/connect" in out
+        assert "walletconnect" in out
 
     @pytest.mark.asyncio
-    async def test_valid_mode_local(self):
-        out = await wallet_cmd.handle_mode("local")
-        assert "not yet implemented" in out
+    async def test_valid_mode_local_when_disconnected(self, disconnected_state):
+        with patch("clawmes.commands.wallet.get_wallet_state", return_value=disconnected_state):
+            out = await wallet_cmd.handle_mode("local")
+        assert "/connect_local" in out
 
     @pytest.mark.asyncio
-    async def test_valid_mode_bankr(self):
-        out = await wallet_cmd.handle_mode("bankr")
-        assert "not yet implemented" in out
+    async def test_valid_mode_bankr_when_disconnected(self, disconnected_state):
+        with patch("clawmes.commands.wallet.get_wallet_state", return_value=disconnected_state):
+            out = await wallet_cmd.handle_mode("bankr")
+        assert "/connect_bankr" in out
 
     @pytest.mark.asyncio
-    async def test_case_insensitive(self):
-        out = await wallet_cmd.handle_mode("BANKR")
-        assert "not yet implemented" in out
+    async def test_case_insensitive(self, disconnected_state):
+        with patch("clawmes.commands.wallet.get_wallet_state", return_value=disconnected_state):
+            out = await wallet_cmd.handle_mode("BANKR")
+        assert "/connect_bankr" in out
+
+    @pytest.mark.asyncio
+    async def test_already_in_mode(self, connected_state):
+        with patch("clawmes.commands.wallet.get_wallet_state", return_value=connected_state):
+            out = await wallet_cmd.handle_mode("walletconnect")
+        assert "Already in" in out
 
 
 class TestChain:
@@ -355,9 +367,90 @@ class TestChain:
         assert "Current chain" in out
 
     @pytest.mark.asyncio
-    async def test_with_arg_stub(self):
+    async def test_switch_when_disconnected(self):
         out = await wallet_cmd.handle_chain("8453")
-        assert "not yet implemented" in out
+        assert "Cannot switch chain" in out
+        assert "No wallet connected" in out
+
+    @pytest.mark.asyncio
+    async def test_switch_by_id(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        new_state = WalletState(
+            connected=True,
+            mode="local",
+            address="0x" + "b" * 40,
+            chain_id=1,
+            chain_name="Ethereum Mainnet",
+        )
+        monkeypatch.setattr(svc, "switch_chain", lambda x: new_state)
+
+        out = await wallet_cmd.handle_chain("1")
+        assert "Ethereum Mainnet" in out
+        assert "id 1" in out
+        assert "0x" + "b" * 40 in out
+
+    @pytest.mark.asyncio
+    async def test_switch_by_name(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        captured: list[object] = []
+
+        def fake_switch(target):
+            captured.append(target)
+            return WalletState(
+                connected=True,
+                mode="local",
+                address="0x" + "b" * 40,
+                chain_id=1,
+                chain_name="Ethereum Mainnet",
+            )
+
+        monkeypatch.setattr(svc, "switch_chain", fake_switch)
+        out = await wallet_cmd.handle_chain("ethereum")
+        assert captured == ["ethereum"]
+        assert "Ethereum Mainnet" in out
+
+    @pytest.mark.asyncio
+    async def test_switch_unsupported_chain(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.services.wallet import WalletConfigError
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def boom(_):
+            raise WalletConfigError("Unknown chain: 'mars'")
+
+        monkeypatch.setattr(svc, "switch_chain", boom)
+        out = await wallet_cmd.handle_chain("mars")
+        assert "Cannot switch chain" in out
+        assert "mars" in out
+
+    @pytest.mark.asyncio
+    async def test_switch_mode_specific_error(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def boom(_):
+            raise RuntimeError("wallet rejected chain switch")
+
+        monkeypatch.setattr(svc, "switch_chain", boom)
+        out = await wallet_cmd.handle_chain("1")
+        assert "Chain switch failed" in out
+        assert "wallet rejected" in out
 
 
 class TestAddress:
