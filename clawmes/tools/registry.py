@@ -156,12 +156,16 @@ def _extract_value_wei(args: dict[str, Any] | None) -> int | None:
 
     1. Explicit ``value_wei`` / ``amount_wei`` — caller knows the gate
        will quantify on this exact integer.
-    2. ``amount`` for a native transfer (no ``token`` arg) — every
-       chain in our registry uses 18 decimals for the gas token, so we
-       can convert without an RPC round-trip and without needing the
-       chain id. ERC-20 transfers (``token`` present) are skipped here:
-       converting requires a decimals lookup which can't safely be a
-       blocking call inside the policy gate.
+    2. ``amount`` for a native transfer (no ``token``) — every chain
+       in our registry uses 18 decimals for the gas token, so we
+       convert without an RPC round-trip.
+    3. ``amount`` for an ERC-20 transfer — read decimals from the
+       :class:`TokenDecimalsService` cache (seed values + previously
+       verified/fallback). We use the non-blocking ``peek`` so the
+       gate never triggers an RPC; unseeded unknown tokens skip the
+       quantitative gate cleanly. Once the tool body has done a
+       successful ``get_strict`` once, the cache fills and subsequent
+       gate evaluations on the same token quantify correctly.
 
     Returns ``None`` when none of these paths produce an integer.
     Quantitative gates silently won't fire on ``None``; callers that
@@ -178,16 +182,26 @@ def _extract_value_wei(args: dict[str, Any] | None) -> int | None:
         except (TypeError, ValueError):
             continue
 
-    # Native-only fallback: convert ``amount`` assuming 18 decimals.
-    if args.get("token"):
-        return None
     amount_raw = args.get("amount")
     if amount_raw is None or amount_raw == "":
         return None
-    try:
-        from clawmes.lib.decimals import to_base_units
 
-        return to_base_units(amount_raw, 18)
+    from clawmes.lib.decimals import to_base_units
+
+    token = args.get("token")
+    if token:
+        # ERC-20: decimals from the cache only (no RPC inside the gate).
+        from clawmes.services.token_decimals import get_token_decimals_service
+
+        chain_id = _extract_chain_id(args) or 8453
+        decimals = get_token_decimals_service().peek(str(token), chain_id)
+        if decimals is None:
+            return None
+    else:
+        decimals = 18
+
+    try:
+        return to_base_units(amount_raw, decimals)
     except (ValueError, ArithmeticError, TypeError):
         return None
 

@@ -138,6 +138,27 @@ class TokenDecimalsService(Service):
                 self._fallback[key] = 18
             return 18
 
+    def peek(self, address: str, chain_id: int) -> int | None:
+        """Return decimals if cached/seeded; ``None`` otherwise. Never RPC.
+
+        Designed for callers (like the policy gate) that need a fast,
+        non-blocking lookup. Returns:
+
+          * The verified value if seeded or previously fetched.
+          * The fallback value (``18``) if the loose path has cached
+            one — same as :meth:`get` would return without re-fetching.
+          * ``None`` if the token is completely unknown.
+
+        The caller decides what to do with ``None`` — typically "skip
+        the quantitative gate, since I can't verify the value at risk."
+        """
+        key = (chain_id, address.lower())
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                return cached
+            return self._fallback.get(key)
+
     def get_strict(self, address: str, chain_id: int) -> int:
         """Return the decimals for an ERC-20 token, or raise.
 

@@ -239,13 +239,14 @@ class TestStage2AmountToWei:
         assert out["isError"] is True
         assert out["details"]["error_code"] == "policy_block"
 
-    def test_token_transfer_skips_amount_gate(self):
-        """ERC-20 transfers — the gate cannot safely convert amount to
-        wei without a decimals lookup. The gate should not fire (no
-        false positives) even when the amount string is large."""
+    def test_token_transfer_unknown_token_skips_amount_gate(self):
+        """ERC-20 transfers with an unknown token — peek returns None,
+        gate cannot quantify, tool runs. This is the fail-open path
+        for tokens we've never seen — the alternative (block-on-
+        uncertainty) would prevent every first-time token transfer."""
 
         @write_tool(
-            name="t_amount_token_skip",
+            name="t_amount_unknown_token",
             toolset="t",
             description="d",
             schema=SAMPLE_SCHEMA,
@@ -258,22 +259,63 @@ class TestStage2AmountToWei:
                 Policy(
                     name="big-transfer",
                     decision="block",
-                    applies_to_tools=("t_amount_token_skip",),
+                    applies_to_tools=("t_amount_unknown_token",),
                     max_amount_wei=10**16,
                 )
             ]
         )
-        # ERC-20: token field present → gate skips amount; tool runs.
         out = json.loads(
             fn(
                 {
                     "amount": "1000000",
-                    "token": "0x" + "2" * 40,
+                    "token": "0x" + "2" * 40,  # unknown
                     "to": "0xabc",
                 }
             )
         )
         assert "isError" not in out
+
+    def test_token_transfer_seeded_token_triggers_gate(self, monkeypatch):
+        """ERC-20 transfers with a seeded token — peek returns 6
+        (USDC), gate converts 1000 USDC -> 10^9 wei (well above 10^7
+        threshold). Gate fires."""
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.token_decimals import TokenDecimalsService
+
+        svc = TokenDecimalsService()
+        monkeypatch.setattr(td_mod, "_instance", svc)
+
+        @write_tool(
+            name="t_amount_seeded_token",
+            toolset="t",
+            description="d",
+            schema=SAMPLE_SCHEMA,
+        )
+        def fn(args, **kw):
+            return json_result({"ran": True})
+
+        policy_storage.save_policies(
+            [
+                Policy(
+                    name="big-transfer",
+                    decision="block",
+                    applies_to_tools=("t_amount_seeded_token",),
+                    max_amount_wei=10**7,  # 10 USDC
+                )
+            ]
+        )
+        out = json.loads(
+            fn(
+                {
+                    "amount": "1000",  # 1000 USDC = 10^9 base units > 10^7 threshold
+                    "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "chain_id": 8453,
+                    "to": "0xabc",
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "policy_block"
 
 
 class TestStage2PolicyBlock:
@@ -499,3 +541,87 @@ class TestExtractHelpers:
     def test_extract_value_wei_amount_with_empty_token(self):
         # Empty-string token is treated as 'no token' — native fallback fires
         assert _extract_value_wei({"amount": "1", "token": "", "to": "0xabc"}) == 10**18
+
+    def test_extract_value_wei_erc20_uses_cached_decimals(self, monkeypatch):
+        # ERC-20 with a seeded token (USDC on Base, 6 decimals).
+        # Gate should convert 100 -> 100 * 10^6.
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.tools import registry as registry_mod
+
+        monkeypatch.setattr(td_mod, "_instance", None)
+        # Force fresh service so seeds are loaded
+        from clawmes.services.token_decimals import TokenDecimalsService
+
+        svc = TokenDecimalsService()
+        monkeypatch.setattr(td_mod, "_instance", svc)
+        monkeypatch.setattr(
+            registry_mod,
+            "_extract_chain_id",
+            lambda args: 8453,
+        )
+        wei = _extract_value_wei(
+            {
+                "amount": "100",
+                "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",  # USDC Base
+                "to": "0xabc",
+            }
+        )
+        assert wei == 100 * 10**6
+
+    def test_extract_value_wei_erc20_unknown_token_returns_none(self, monkeypatch):
+        # No seed, no prior fetch, no fallback — peek returns None,
+        # gate skips quantitative evaluation. Crucially, no RPC call.
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.token_decimals import TokenDecimalsService
+
+        svc = TokenDecimalsService()
+        monkeypatch.setattr(td_mod, "_instance", svc)
+
+        # If anything tries to issue an RPC inside the gate, this would
+        # fail (no rpc service configured). We rely on peek staying
+        # non-blocking.
+        result = _extract_value_wei(
+            {
+                "amount": "100",
+                "token": "0x" + "f" * 40,  # unknown token
+                "to": "0xabc",
+            }
+        )
+        assert result is None
+
+    def test_extract_value_wei_erc20_explicit_chain_id(self, monkeypatch):
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.token_decimals import TokenDecimalsService
+
+        svc = TokenDecimalsService()
+        monkeypatch.setattr(td_mod, "_instance", svc)
+        # USDC on Ethereum mainnet (chain 1)
+        wei = _extract_value_wei(
+            {
+                "amount": "50",
+                "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "chain_id": 1,
+                "to": "0xabc",
+            }
+        )
+        assert wei == 50 * 10**6
+
+    def test_extract_value_wei_erc20_uses_loose_fallback(self, monkeypatch):
+        # If the loose-fallback tier has 18, peek returns 18 — gate
+        # quantifies (with a possibly-wrong large value, which is fine
+        # because over-quantifying causes more confirms not fewer).
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.token_decimals import TokenDecimalsService
+
+        svc = TokenDecimalsService()
+        token = "0x" + "5" * 40
+        svc._fallback[(8453, token)] = 18
+        monkeypatch.setattr(td_mod, "_instance", svc)
+        wei = _extract_value_wei(
+            {
+                "amount": "1",
+                "token": token,
+                "to": "0xabc",
+            }
+        )
+        assert wei == 10**18
