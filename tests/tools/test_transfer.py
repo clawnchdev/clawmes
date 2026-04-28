@@ -1,9 +1,9 @@
-"""Tests for the ``transfer`` tool skeleton."""
+"""Tests for the ``transfer`` tool."""
 
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,57 +13,308 @@ from clawmes.wallet.state import WalletState
 
 @pytest.fixture(autouse=True)
 def _isolate_wallet(monkeypatch):
-    """Reset the wallet service singleton each test."""
+    """Reset wallet + RPC singletons each test."""
+    from clawmes.services import rpc as rpc_mod
     from clawmes.services import wallet as wallet_mod
 
     monkeypatch.setattr(wallet_mod, "_instance", None)
+    monkeypatch.setattr(rpc_mod, "_instance", None)
+
+
+@pytest.fixture
+def connected_wallet(monkeypatch):
+    """Patch get_wallet_state to return a connected Base wallet."""
+    connected = WalletState.for_chain(
+        mode="walletconnect",
+        address="0x" + "a" * 40,
+        chain_id=8453,
+    )
+    monkeypatch.setattr("clawmes.tools.transfer.get_wallet_state", lambda: connected)
+    return connected
+
+
+@pytest.fixture
+def fake_mode(monkeypatch):
+    """Install a fake active wallet mode that returns a canned tx hash."""
+    from clawmes.services import wallet as wallet_mod
+
+    mode = MagicMock()
+    mode.send_transaction.return_value = "0x" + "f" * 64
+    svc = MagicMock()
+    svc.active_mode = mode
+    monkeypatch.setattr(wallet_mod, "get_wallet_service", lambda: svc)
+    return mode
+
+
+@pytest.fixture
+def fake_rpc(monkeypatch):
+    """Install a fake RPC service whose wait_for_receipt returns a success
+    receipt by default."""
+    from clawmes.services import rpc as rpc_mod
+
+    rpc = MagicMock()
+    rpc.wait_for_receipt.return_value = {
+        "status": "0x1",
+        "blockNumber": "0x123",
+        "gasUsed": "0x5208",  # 21000
+    }
+    monkeypatch.setattr(rpc_mod, "get_rpc_service", lambda: rpc)
+    return rpc
 
 
 class TestNoWallet:
     def test_send_no_wallet(self):
-        out = json.loads(transfer({"action": "send", "to": "alice.eth", "amount": "1"}))
+        out = json.loads(transfer({"action": "send", "to": "0xdead", "amount": "1"}))
         assert out["isError"] is True
         assert out["details"]["error_code"] == "wallet_not_connected"
 
     def test_estimate_no_wallet(self):
-        out = json.loads(transfer({"action": "estimate", "to": "alice.eth", "amount": "1"}))
+        out = json.loads(transfer({"action": "estimate", "to": "0xdead", "amount": "1"}))
         assert out["isError"] is True
         assert out["details"]["error_code"] == "wallet_not_connected"
 
 
-class TestWithWallet:
-    @pytest.fixture
-    def connected_wallet(self):
-        connected = WalletState.for_chain(
+class TestEstimate:
+    def test_native_estimate_basic(self, connected_wallet):
+        out = json.loads(transfer({"action": "estimate", "to": "0x" + "1" * 40, "amount": "0.5"}))
+        assert "isError" not in out
+        details = out["details"]
+        assert details["chain_id"] == 8453
+        assert details["chain"] == "Base"
+        assert details["estimated_gas"] == 21000
+        assert details["value_wei"] == str(5 * 10**17)
+        assert details["token"] == "native"
+        # Summary is a multi-line string; first line names the asset+chain
+        body = out["content"][0]["text"]
+        assert "Base" in body
+        assert "0.5" in body
+
+    def test_estimate_rejects_token(self, connected_wallet):
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "1",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "not_implemented"
+
+    def test_estimate_unknown_chain(self, monkeypatch, connected_wallet):
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "1",
+                    "chain_id": 999_999,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "unsupported_chain"
+
+    def test_estimate_rejects_negative_amount(self, connected_wallet):
+        out = json.loads(transfer({"action": "estimate", "to": "0x" + "1" * 40, "amount": "-1"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_estimate_chain_id_string(self, connected_wallet):
+        # LLMs sometimes pass chain_id as a string; we coerce.
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "1",
+                    "chain_id": "1",
+                }
+            )
+        )
+        assert "isError" not in out
+        assert out["details"]["chain_id"] == 1
+        assert out["details"]["chain"] == "Ethereum Mainnet"
+
+    def test_estimate_bad_chain_id_falls_back(self, connected_wallet):
+        # Garbage chain_id falls back to wallet's chain (8453).
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "1",
+                    "chain_id": "not-a-number",
+                }
+            )
+        )
+        assert "isError" not in out
+        assert out["details"]["chain_id"] == 8453
+
+
+class TestSendNative:
+    def test_send_success_with_receipt(self, connected_wallet, fake_mode, fake_rpc):
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        assert "isError" not in out
+        details = out["details"]
+        assert details["tx_hash"] == "0x" + "f" * 64
+        assert details["status"] == "success"
+        assert details["block_number"] == 0x123
+        assert details["gas_used"] == 21000
+        assert details["explorer_url"].endswith("/tx/0x" + "f" * 64)
+        # The mode received the right args
+        kwargs = fake_mode.send_transaction.call_args.kwargs
+        assert kwargs["to"] == "0x" + "1" * 40
+        assert kwargs["value"] == 10**16
+        assert kwargs["chain_id"] == 8453
+
+    def test_send_skip_receipt(self, connected_wallet, fake_mode, fake_rpc):
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "0.01",
+                    "await_receipt": False,
+                }
+            )
+        )
+        assert "isError" not in out
+        assert out["details"]["status"] == "pending"
+        # wait_for_receipt was not called
+        fake_rpc.wait_for_receipt.assert_not_called()
+        body = out["content"][0]["text"]
+        assert "receipt polling skipped" in body
+
+    def test_send_receipt_timeout_returns_pending(self, connected_wallet, fake_mode, fake_rpc):
+        from clawmes.services.rpc import RpcError
+
+        fake_rpc.wait_for_receipt.side_effect = RpcError(
+            -32000, "timed out after 120s", method="eth_getTransactionReceipt"
+        )
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        # Timeout is NOT a tool error — the tx may still mine.
+        assert "isError" not in out
+        assert out["details"]["status"] == "pending"
+        body = out["content"][0]["text"]
+        assert "Receipt not seen" in body
+
+    def test_send_reverted(self, connected_wallet, fake_mode, fake_rpc):
+        fake_rpc.wait_for_receipt.return_value = {
+            "status": "0x0",
+            "blockNumber": 100,
+            "gasUsed": 21000,
+        }
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        assert "isError" not in out
+        assert out["details"]["status"] == "reverted"
+        body = out["content"][0]["text"]
+        assert "Reverted" in body
+
+    def test_send_pre_byzantium_root_treated_success(self, connected_wallet, fake_mode, fake_rpc):
+        # No `status` field; legacy `root`-style receipt — success.
+        fake_rpc.wait_for_receipt.return_value = {
+            "root": "0x" + "a" * 64,
+            "blockNumber": "0x10",
+            "gasUsed": "0x5208",
+        }
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        assert out["details"]["status"] == "success"
+
+    def test_send_no_active_mode(self, connected_wallet, monkeypatch):
+        from clawmes.services import wallet as wallet_mod
+
+        svc = MagicMock()
+        svc.active_mode = None
+        monkeypatch.setattr(wallet_mod, "get_wallet_service", lambda: svc)
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "wallet_not_connected"
+
+    def test_send_mode_raises(self, connected_wallet, fake_mode):
+        fake_mode.send_transaction.side_effect = RuntimeError("nonce conflict")
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "send_failed"
+        assert "nonce conflict" in out["content"][0]["text"]
+
+    def test_send_rejects_token(self, connected_wallet, fake_mode):
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "1",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "not_implemented"
+
+    def test_send_unknown_chain(self, connected_wallet, fake_mode):
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "1",
+                    "chain_id": 999_999,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "unsupported_chain"
+
+    def test_send_rejects_negative_amount(self, connected_wallet, fake_mode):
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "-1"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+
+class TestUnknownAction:
+    def test_unknown_action(self, connected_wallet):
+        out = json.loads(transfer({"action": "drain", "to": "0x" + "1" * 40, "amount": "1"}))
+        assert out["isError"] is True
+        # `drain` is a valid string for read_str; fails our own dispatcher
+        assert out["details"]["error_code"] == "invalid_action"
+
+
+class TestTargetChainFallback:
+    def test_state_chain_id_none_defaults_8453(self, monkeypatch, fake_mode, fake_rpc):
+        # Connected but no chain_id on the state — fall back to Base.
+        connected = WalletState(
+            connected=True,
             mode="walletconnect",
             address="0x" + "a" * 40,
-            chain_id=8453,
+            chain_id=None,
         )
-        with patch("clawmes.tools.transfer.get_wallet_state", return_value=connected):
-            yield connected
+        monkeypatch.setattr("clawmes.tools.transfer.get_wallet_state", lambda: connected)
+        out = json.loads(transfer({"action": "send", "to": "0x" + "1" * 40, "amount": "0.01"}))
+        assert "isError" not in out
+        assert out["details"]["chain_id"] == 8453
 
-    def test_send_not_implemented(self, connected_wallet):
-        out = json.loads(transfer({"action": "send", "to": "alice.eth", "amount": "1"}))
-        assert out["isError"] is True
-        assert out["details"]["error_code"] == "not_implemented"
 
-    def test_estimate_not_implemented(self, connected_wallet):
-        out = json.loads(transfer({"action": "estimate", "to": "alice.eth", "amount": "1"}))
-        assert out["isError"] is True
-        assert out["details"]["error_code"] == "not_implemented"
+class TestReceiptHelpers:
+    def test_summarize_receipt_int_fields(self):
+        from clawmes.tools.transfer import _summarize_receipt
 
-    def test_unknown_action(self, connected_wallet):
-        out = json.loads(transfer({"action": "drain", "to": "alice.eth", "amount": "1"}))
-        # 'drain' fails the schema enum at param_error (read_str passes it
-        # through; the dispatcher catches the unknown action). ParamError
-        # is raised by read_str if action is missing; but if action is
-        # *valid string* but wrong value, the dispatch returns "Unknown
-        # action".
-        assert out["isError"] is True
-        # Could be either invalid_action (own dispatcher) or param_error
-        # depending on the schema enum check. Our read_str just returns
-        # the string, so we land in invalid_action.
-        assert out["details"]["error_code"] in ("invalid_action", "param_error")
+        success, block, gas = _summarize_receipt(
+            {"status": 1, "blockNumber": 100, "gasUsed": 21000}
+        )
+        assert success is True
+        assert block == 100
+        assert gas == 21000
+
+    def test_hex_or_int_decimal_string(self):
+        from clawmes.tools.transfer import _hex_or_int
+
+        assert _hex_or_int("100") == 100
+        assert _hex_or_int("0x10") == 16
+        assert _hex_or_int(42) == 42
+        assert _hex_or_int(None) == 0
 
 
 class TestRegister:
