@@ -8,6 +8,20 @@ sufficient.
 For the small set of tokens we use repeatedly (USDC, WETH, etc.) we
 seed the cache with known values so a fresh install can render
 balances immediately without an RPC round-trip.
+
+**Two access methods, with very different failure semantics:**
+
+* :meth:`TokenDecimalsService.get` — fall-back path. Returns ``18``
+  if the on-chain call fails. Use this for read-only display
+  (balance summaries, price lookups). A wrong-by-default value is
+  acceptable for human-readable output and converges to correct on
+  the next successful lookup.
+* :meth:`TokenDecimalsService.get_strict` — fail-loud path. Raises
+  :class:`TokenDecimalsError` if the call fails. Use this for any
+  path that converts a human amount to base units before signing
+  (transfer, swap, approve, etc.). A silent fallback to 18 here
+  would, for a 6-decimal token like USDC, multiply the user's
+  intended amount by 10^12.
 """
 
 from __future__ import annotations
@@ -20,6 +34,21 @@ from clawmes.services._base import Service
 from clawmes.services.rpc import RpcError, get_rpc_service
 
 _log = logger_for("services.token_decimals")
+
+
+class TokenDecimalsError(RuntimeError):
+    """Raised by :meth:`TokenDecimalsService.get_strict` when the
+    on-chain ``decimals()`` call fails and no cached value is available.
+
+    Carries the original cause so the caller can surface a useful
+    diagnostic to the user.
+    """
+
+    def __init__(self, address: str, chain_id: int, cause: Exception) -> None:
+        super().__init__(f"could not determine decimals for {address} on chain {chain_id}: {cause}")
+        self.address = address
+        self.chain_id = chain_id
+        self.cause = cause
 
 
 # Curated seed cache — contract addresses normalized lowercase.
@@ -50,10 +79,18 @@ class TokenDecimalsService(Service):
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        # Pre-populate seeds at construction so callers that bypass
-        # the lifecycle (tests, ad-hoc scripts) still get accurate
-        # decimals for the curated set without an RPC round-trip.
+        # Two-tier cache:
+        #   _cache       — verified values (from RPC or seed). Strict
+        #                  reads trust these.
+        #   _fallback    — last-resort 18 from a failed lookup. Loose
+        #                  reads return these to avoid hammering the
+        #                  RPC on every balance render. Strict reads
+        #                  IGNORE these and re-issue the call (with a
+        #                  chance to surface the underlying RPC error
+        #                  to the user).
+        # Seeds are verified by definition.
         self._cache: dict[tuple[int, str], int] = dict(_SEED)
+        self._fallback: dict[tuple[int, str], int] = {}
 
     def start(self) -> None:
         _log.info("token_decimals service started (%d seed entries)", len(self._cache))
@@ -61,21 +98,76 @@ class TokenDecimalsService(Service):
     def stop(self) -> None:
         with self._lock:
             self._cache.clear()
+            self._fallback.clear()
 
     def get(self, address: str, chain_id: int) -> int:
-        """Return the decimals for an ERC-20 token.
+        """Return the decimals for an ERC-20 token, with fallback.
 
-        Cached after the first lookup. Falls back to ``18`` (the
-        most common default) if the on-chain ``decimals()`` call
-        fails — better to render a possibly-wrong balance than to
-        crash a balance summary.
+        Returns the verified value if cached/fetchable. Falls back to
+        ``18`` (the most common default) on RPC failure — appropriate
+        for read-only display where a possibly-wrong rendering is
+        preferable to crashing the whole balance summary.
+
+        Fallback values are stored separately from verified values:
+        :meth:`get_strict` ignores them and re-tries the RPC.
+
+        **Do not use on a send path.** A 6-decimal token like USDC
+        with this method silently multiplies the amount by 10^12 if
+        the lookup fails. Use :meth:`get_strict` for any conversion
+        that feeds into a signed transaction.
         """
         key = (chain_id, address.lower())
         with self._lock:
             cached = self._cache.get(key)
             if cached is not None:
                 return cached
+            fallback_cached = self._fallback.get(key)
+        if fallback_cached is not None:
+            return fallback_cached
 
+        try:
+            return self._fetch_and_cache(address, chain_id)
+        except TokenDecimalsError as exc:
+            _log.warning(
+                "decimals() lookup failed for %s on chain %d (%s); loose-path falling back to 18",
+                address,
+                chain_id,
+                exc.cause,
+            )
+            with self._lock:
+                self._fallback[key] = 18
+            return 18
+
+    def get_strict(self, address: str, chain_id: int) -> int:
+        """Return the decimals for an ERC-20 token, or raise.
+
+        Returns a verified cached value (seed or prior successful RPC).
+        Raises :class:`TokenDecimalsError` if no verified value exists
+        and the RPC fails — the caller MUST handle this rather than
+        fall back to a default, because the value feeds into
+        ``to_base_units(amount, decimals)`` and a wrong decimals there
+        can multiply or divide the actual amount by powers of 10^12
+        silently.
+
+        Fallback values from a previous loose ``get`` call are NOT
+        trusted — strict re-issues the RPC to give the user a fresh
+        error message if the network's still flaky.
+        """
+        key = (chain_id, address.lower())
+        with self._lock:
+            cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+
+        return self._fetch_and_cache(address, chain_id)
+
+    def _fetch_and_cache(self, address: str, chain_id: int) -> int:
+        """Issue ``decimals()`` and store the result in the verified cache.
+
+        Raises :class:`TokenDecimalsError` (the caller decides whether
+        to fall back). On success, also evicts any stale fallback
+        entry so future loose reads see the verified value.
+        """
         try:
             raw = get_rpc_service().eth_call(
                 to=address,
@@ -84,16 +176,12 @@ class TokenDecimalsService(Service):
             )
             decimals = decode_uint8(raw)
         except (RpcError, ValueError) as exc:
-            _log.warning(
-                "decimals() lookup failed for %s on chain %d (%s); falling back to 18",
-                address,
-                chain_id,
-                exc,
-            )
-            decimals = 18
+            raise TokenDecimalsError(address, chain_id, exc) from exc
 
+        key = (chain_id, address.lower())
         with self._lock:
             self._cache[key] = decimals
+            self._fallback.pop(key, None)
         return decimals
 
 

@@ -105,7 +105,8 @@ class TestEstimate:
         from clawmes.services import token_decimals as td_mod
 
         td = MagicMock()
-        td.get.return_value = 6  # USDC-style
+        td.get.return_value = 6
+        td.get_strict.return_value = 6  # USDC-style
         monkeypatch.setattr(td_mod, "_instance", td)
 
         out = json.loads(
@@ -135,6 +136,7 @@ class TestEstimate:
 
         td = MagicMock()
         td.get.return_value = 6
+        td.get_strict.return_value = 6
         monkeypatch.setattr(td_mod, "_instance", td)
         fake_rpc.estimate_gas.side_effect = RpcError(-32000, "reverted", method="eth_estimateGas")
         out = json.loads(
@@ -162,6 +164,7 @@ class TestEstimate:
 
         td = MagicMock()
         td.get.return_value = 6
+        td.get_strict.return_value = 6
         monkeypatch.setattr(td_mod, "_instance", td)
         # Override get_wallet_state to disconnected so the estimate path
         # exercises the no-wallet branch.
@@ -207,6 +210,7 @@ class TestEstimate:
 
         td = MagicMock()
         td.get.return_value = 6
+        td.get_strict.return_value = 6
         monkeypatch.setattr(td_mod, "_instance", td)
         out = json.loads(
             transfer(
@@ -362,7 +366,8 @@ class TestSendNative:
         from clawmes.services import token_decimals as td_mod
 
         td = MagicMock()
-        td.get.return_value = 18  # WETH-style
+        td.get.return_value = 18
+        td.get_strict.return_value = 18  # WETH-style
         monkeypatch.setattr(td_mod, "_instance", td)
 
         out = json.loads(
@@ -412,6 +417,7 @@ class TestSendNative:
 
         td = MagicMock()
         td.get.return_value = 18
+        td.get_strict.return_value = 18
         monkeypatch.setattr(td_mod, "_instance", td)
         out = json.loads(
             transfer(
@@ -432,6 +438,7 @@ class TestSendNative:
 
         td = MagicMock()
         td.get.return_value = 6
+        td.get_strict.return_value = 6
         monkeypatch.setattr(td_mod, "_instance", td)
         fake_mode.send_transaction.side_effect = RuntimeError("rejected by user")
         out = json.loads(
@@ -453,6 +460,7 @@ class TestSendNative:
 
         td = MagicMock()
         td.get.return_value = 6
+        td.get_strict.return_value = 6
         monkeypatch.setattr(td_mod, "_instance", td)
         monkeypatch.setattr(transfer_mod, "resolve_ens", lambda name: "0x" + "a" * 40)
         out = json.loads(
@@ -471,6 +479,67 @@ class TestSendNative:
         assert details["resolved_address"] == "0x" + "a" * 40
         assert details["to"] == "0x" + "a" * 40
 
+    def test_send_erc20_decimals_lookup_failure_aborts(
+        self, connected_wallet, fake_mode, monkeypatch
+    ):
+        """Critical safety test: if the decimals lookup fails on the
+        send path, the tool MUST abort with decimals_lookup_failed
+        rather than fall back to 18 — for a 6-decimal token like USDC
+        a silent fallback would multiply the user's amount by 10^12."""
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.rpc import RpcError
+        from clawmes.services.token_decimals import TokenDecimalsError
+
+        td = MagicMock()
+        td.get_strict.side_effect = TokenDecimalsError(
+            "0x" + "2" * 40,
+            8453,
+            RpcError(-32000, "node down", method="eth_call"),
+        )
+        monkeypatch.setattr(td_mod, "_instance", td)
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "100",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "decimals_lookup_failed"
+        # Nothing got signed
+        fake_mode.send_transaction.assert_not_called()
+        # Error message warns about the 10^12 risk
+        body = out["content"][0]["text"]
+        assert "10^12" in body
+
+    def test_estimate_erc20_decimals_lookup_failure_aborts(self, connected_wallet, monkeypatch):
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.services.rpc import RpcError
+        from clawmes.services.token_decimals import TokenDecimalsError
+
+        td = MagicMock()
+        td.get_strict.side_effect = TokenDecimalsError(
+            "0x" + "2" * 40,
+            8453,
+            RpcError(-32000, "node down", method="eth_call"),
+        )
+        monkeypatch.setattr(td_mod, "_instance", td)
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "100",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "decimals_lookup_failed"
+
     def test_send_erc20_estimate_failure_uses_fallback(
         self, connected_wallet, fake_mode, fake_rpc, monkeypatch
     ):
@@ -479,6 +548,7 @@ class TestSendNative:
 
         td = MagicMock()
         td.get.return_value = 6
+        td.get_strict.return_value = 6
         monkeypatch.setattr(td_mod, "_instance", td)
         # Simulate estimateGas reverting (e.g. balance too low for the
         # simulated tx). The tool should still proceed with the static
@@ -512,6 +582,7 @@ class TestSendNative:
 
         td = MagicMock()
         td.get.return_value = 18
+        td.get_strict.return_value = 18
         monkeypatch.setattr(td_mod, "_instance", td)
         monkeypatch.setattr(transfer_mod, "resolve_ens", lambda name: "0x" + "a" * 40)
         out = json.loads(

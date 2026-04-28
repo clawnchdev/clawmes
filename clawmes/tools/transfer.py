@@ -212,11 +212,21 @@ def _estimate_native(*, chain, to_addr, ens_name, amount) -> str:
 
 
 def _estimate_erc20(*, chain, token, to_addr, ens_name, amount) -> str:
+    from clawmes.services.token_decimals import TokenDecimalsError
+
     token_validation = _validate_token_address(token)
     if token_validation is not None:
         return token_validation
 
-    decimals = _fetch_token_decimals(token, chain.chain_id)
+    try:
+        decimals = _fetch_token_decimals(token, chain.chain_id)
+    except TokenDecimalsError as exc:
+        return error_result(
+            f"Cannot determine decimals for token {token}: {exc.cause}. "
+            "Refusing to estimate without confirmed decimals — a wrong "
+            "value here can multiply your amount by 10^12.",
+            code="decimals_lookup_failed",
+        )
     try:
         amount_base = to_base_units(amount, decimals)
     except (ValueError, ArithmeticError) as exc:
@@ -292,10 +302,20 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
         )
 
     if token:
+        from clawmes.services.token_decimals import TokenDecimalsError
+
         token_validation = _validate_token_address(token)
         if token_validation is not None:
             return token_validation
-        decimals = _fetch_token_decimals(token, chain.chain_id)
+        try:
+            decimals = _fetch_token_decimals(token, chain.chain_id)
+        except TokenDecimalsError as exc:
+            return error_result(
+                f"Cannot determine decimals for token {token}: {exc.cause}. "
+                "Refusing to send without confirmed decimals — a wrong value "
+                "here can multiply your amount by 10^12.",
+                code="decimals_lookup_failed",
+            )
         try:
             amount_base = to_base_units(amount, decimals)
         except (ValueError, ArithmeticError) as exc:
@@ -540,14 +560,18 @@ def _validate_token_address(token: str) -> str | None:
 
 
 def _fetch_token_decimals(token: str, chain_id: int) -> int:
-    """Return ERC-20 decimals for ``token`` on ``chain_id``.
+    """Return ERC-20 decimals for ``token`` on ``chain_id``, or raise.
 
-    Caches via :class:`TokenDecimalsService`; falls back to 18 on RPC
-    failure (the service handles that internally + logs).
+    The transfer tool's send path converts a human amount to base
+    units via this value. A silent fallback to 18 here would — for
+    a 6-decimal token like USDC — encode 100 as ``100 * 10^18`` base
+    units = 100 trillion USDC. We use the strict path that propagates
+    :class:`TokenDecimalsError` so a lookup failure becomes a clean
+    tool error instead of a catastrophic transaction.
     """
     from clawmes.services.token_decimals import get_token_decimals_service
 
-    return get_token_decimals_service().get(token, chain_id)
+    return get_token_decimals_service().get_strict(token, chain_id)
 
 
 def _resolve_recipient(to_input: str) -> tuple[str, str | None] | str:
