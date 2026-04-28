@@ -89,19 +89,62 @@ class TestEstimate:
         assert "Base" in body
         assert "0.5" in body
 
-    def test_estimate_rejects_token(self, connected_wallet):
+    def test_estimate_erc20_basic(self, connected_wallet, monkeypatch):
+        from clawmes.services import token_decimals as td_mod
+
+        td = MagicMock()
+        td.get.return_value = 6  # USDC-style
+        monkeypatch.setattr(td_mod, "_instance", td)
+
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "100",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert "isError" not in out
+        details = out["details"]
+        assert details["token"] == "0x" + "2" * 40
+        assert details["token_decimals"] == 6
+        assert details["amount_base_units"] == "100000000"
+        assert details["estimated_gas"] == 100_000
+
+    def test_estimate_invalid_token_address(self, connected_wallet):
         out = json.loads(
             transfer(
                 {
                     "action": "estimate",
                     "to": "0x" + "1" * 40,
                     "amount": "1",
+                    "token": "0xabc",  # too short
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_estimate_erc20_bad_amount(self, connected_wallet, monkeypatch):
+        from clawmes.services import token_decimals as td_mod
+
+        td = MagicMock()
+        td.get.return_value = 6
+        monkeypatch.setattr(td_mod, "_instance", td)
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "0x" + "1" * 40,
+                    "amount": "-100",
                     "token": "0x" + "2" * 40,
                 }
             )
         )
         assert out["isError"] is True
-        assert out["details"]["error_code"] == "not_implemented"
+        assert out["details"]["error_code"] == "param_error"
 
     def test_estimate_unknown_chain(self, monkeypatch, connected_wallet):
         out = json.loads(
@@ -240,19 +283,143 @@ class TestSendNative:
         assert out["details"]["error_code"] == "send_failed"
         assert "nonce conflict" in out["content"][0]["text"]
 
-    def test_send_rejects_token(self, connected_wallet, fake_mode):
+    def test_send_erc20_success(self, connected_wallet, fake_mode, fake_rpc, monkeypatch):
+        from clawmes.services import token_decimals as td_mod
+
+        td = MagicMock()
+        td.get.return_value = 18  # WETH-style
+        monkeypatch.setattr(td_mod, "_instance", td)
+
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "1.5",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert "isError" not in out
+        details = out["details"]
+        assert details["status"] == "success"
+        assert details["token"] == "0x" + "2" * 40
+        assert details["amount_base_units"] == str(15 * 10**17)
+        # Mode received the calldata, value=0, gas=100k, to=token
+        kwargs = fake_mode.send_transaction.call_args.kwargs
+        assert kwargs["to"] == "0x" + "2" * 40
+        assert kwargs["value"] == 0
+        assert kwargs["gas"] == 100_000
+        assert kwargs["data"].startswith("0xa9059cbb")
+        # Encoded recipient is the right-padded version of the to_addr
+        assert "1" * 40 in kwargs["data"].lower()
+
+    def test_send_erc20_invalid_token_address(self, connected_wallet, fake_mode):
         out = json.loads(
             transfer(
                 {
                     "action": "send",
                     "to": "0x" + "1" * 40,
                     "amount": "1",
+                    "token": "0xabc",
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+        fake_mode.send_transaction.assert_not_called()
+
+    def test_send_erc20_bad_amount(self, connected_wallet, fake_mode, monkeypatch):
+        from clawmes.services import token_decimals as td_mod
+
+        td = MagicMock()
+        td.get.return_value = 18
+        monkeypatch.setattr(td_mod, "_instance", td)
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "-1",
                     "token": "0x" + "2" * 40,
                 }
             )
         )
         assert out["isError"] is True
-        assert out["details"]["error_code"] == "not_implemented"
+        assert out["details"]["error_code"] == "param_error"
+        fake_mode.send_transaction.assert_not_called()
+
+    def test_send_erc20_mode_raises(self, connected_wallet, fake_mode, monkeypatch):
+        from clawmes.services import token_decimals as td_mod
+
+        td = MagicMock()
+        td.get.return_value = 6
+        monkeypatch.setattr(td_mod, "_instance", td)
+        fake_mode.send_transaction.side_effect = RuntimeError("rejected by user")
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "0x" + "1" * 40,
+                    "amount": "10",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "send_failed"
+
+    def test_estimate_erc20_with_ens_recipient(self, connected_wallet, monkeypatch):
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.tools import transfer as transfer_mod
+
+        td = MagicMock()
+        td.get.return_value = 6
+        monkeypatch.setattr(td_mod, "_instance", td)
+        monkeypatch.setattr(transfer_mod, "resolve_ens", lambda name: "0x" + "a" * 40)
+        out = json.loads(
+            transfer(
+                {
+                    "action": "estimate",
+                    "to": "alice.eth",
+                    "amount": "100",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert "isError" not in out
+        details = out["details"]
+        assert details["ens_name"] == "alice.eth"
+        assert details["resolved_address"] == "0x" + "a" * 40
+        assert details["to"] == "0x" + "a" * 40
+
+    def test_send_erc20_with_ens_recipient(
+        self, connected_wallet, fake_mode, fake_rpc, monkeypatch
+    ):
+        from clawmes.services import token_decimals as td_mod
+        from clawmes.tools import transfer as transfer_mod
+
+        td = MagicMock()
+        td.get.return_value = 18
+        monkeypatch.setattr(td_mod, "_instance", td)
+        monkeypatch.setattr(transfer_mod, "resolve_ens", lambda name: "0x" + "a" * 40)
+        out = json.loads(
+            transfer(
+                {
+                    "action": "send",
+                    "to": "alice.eth",
+                    "amount": "1.5",
+                    "token": "0x" + "2" * 40,
+                }
+            )
+        )
+        assert "isError" not in out
+        details = out["details"]
+        assert details["ens_name"] == "alice.eth"
+        assert details["resolved_address"] == "0x" + "a" * 40
+        # The encoded calldata transferred to the resolved address
+        kwargs = fake_mode.send_transaction.call_args.kwargs
+        assert "a" * 40 in kwargs["data"].lower()
 
     def test_send_unknown_chain(self, connected_wallet, fake_mode):
         out = json.loads(

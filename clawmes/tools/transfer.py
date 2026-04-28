@@ -1,33 +1,41 @@
-"""``transfer`` — send ETH to a recipient and (optionally) wait for the receipt.
-
-Native EVM transfers only at this milestone — ERC-20 transfers will land
-when the token-transfer adapter and approval-gate plumbing are in place.
+"""``transfer`` — send ETH or ERC-20 tokens and (optionally) wait for the receipt.
 
 Two actions:
 
-  * ``estimate`` — returns the gas estimate (21000 for native), the wei
-    value, and the route summary. No on-chain submission.
-  * ``send``    — broadcasts via the active wallet mode, returns the tx
-    hash, and (when ``await_receipt`` is true, the default) blocks
+  * ``estimate`` — returns the gas estimate (21000 for native, ~100k
+    for ERC-20), the wei/base-unit value, and the route summary. No
+    on-chain submission.
+  * ``send``    — broadcasts via the active wallet mode, returns the
+    tx hash, and (when ``await_receipt`` is true, the default) blocks
     until the receipt arrives or the timeout elapses.
 
+Native vs ERC-20:
+
+  * Native (no ``token``) — converts amount via the chain's
+    ``native_decimals`` from the static registry; gas is the EVM-fixed
+    21000.
+  * ERC-20 (``token=<address>``) — looks up decimals via
+    :class:`TokenDecimalsService` (RPC + on-disk cache, falls back to
+    18 on lookup failure), encodes ``transfer(to, amount)`` calldata,
+    and submits with ``value=0``. Gas defaults to 100,000 (a safe
+    upper bound for a vanilla ERC-20 transfer; real estimation lands
+    when ``eth_estimateGas`` integration follows).
+
 The tool reads the chain id from the connected wallet state — callers
-that want to override pass ``chain_id`` explicitly. Token decimals come
-from :mod:`clawmes.lib.chains` for native, so we don't pay for an
-on-chain ``decimals()`` call when sending the gas token.
+that want to override pass ``chain_id`` explicitly.
 
 Policy gating note: the ``@write_tool`` decorator extracts
-``value_wei``/``amount_wei`` for the policy evaluator. Tools using the
-human-friendly ``amount`` field can also pass ``value_wei`` if they
-want the quantitative gates (e.g. ``confirm_large_transfers``) to fire.
-For now we leave that to the LLM caller; the gate is opt-in for the
-amount path.
+``value_wei``/``amount_wei`` for the policy evaluator. Native tx with
+the human-friendly ``amount`` field do not auto-populate value_wei in
+the gate; callers that want quantitative gates to fire pass
+``value_wei`` explicitly.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from clawmes.lib.abi import encode_transfer
 from clawmes.lib.chains import get_chain
 from clawmes.lib.decimals import to_base_units
 from clawmes.lib.ens import EnsError, is_ens_name
@@ -36,6 +44,12 @@ from clawmes.lib.params import read_bool, read_str
 from clawmes.lib.tool_result import error_result, json_result
 from clawmes.services.wallet import get_wallet_state
 from clawmes.tools.registry import register_with_ctx, write_tool
+
+# Conservative ceiling for an ERC-20 ``transfer`` call. Real gas usage
+# is typically 50–65k for a non-first-touch transfer; 100k gives
+# headroom for first-touch storage initialization without overpaying
+# wildly. Real estimation lands when ``eth_estimateGas`` is wired.
+_ERC20_GAS_DEFAULT = 100_000
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -128,15 +142,9 @@ def transfer(args: dict[str, Any], **kwargs: Any) -> str:
 
 
 def _handle_estimate(args: dict[str, Any], state: Any) -> str:
-    token = read_str(args, "token")
-    if token:
-        return error_result(
-            "ERC-20 estimate is not yet implemented; native only at this milestone.",
-            code="not_implemented",
-        )
-
     to_input = read_str(args, "to", required=True)
     amount = read_str(args, "amount", required=True)
+    token = read_str(args, "token")
     target_chain_id = _target_chain_id(args, state)
     chain = _lookup_chain(target_chain_id)
     if chain is None:
@@ -151,6 +159,23 @@ def _handle_estimate(args: dict[str, Any], state: Any) -> str:
         return resolved
     to_addr, ens_name = resolved
 
+    if token:
+        return _estimate_erc20(
+            chain=chain,
+            token=token,
+            to_addr=to_addr,
+            ens_name=ens_name,
+            amount=amount,
+        )
+    return _estimate_native(
+        chain=chain,
+        to_addr=to_addr,
+        ens_name=ens_name,
+        amount=amount,
+    )
+
+
+def _estimate_native(*, chain, to_addr, ens_name, amount) -> str:
     try:
         value_wei = to_base_units(amount, chain.native_decimals)
     except (ValueError, ArithmeticError) as exc:
@@ -180,19 +205,49 @@ def _handle_estimate(args: dict[str, Any], state: Any) -> str:
     )
 
 
-def _handle_send(args: dict[str, Any], state: Any) -> str:
-    from clawmes.services.rpc import RpcError, get_rpc_service
-    from clawmes.services.wallet import get_wallet_service
+def _estimate_erc20(*, chain, token, to_addr, ens_name, amount) -> str:
+    token_validation = _validate_token_address(token)
+    if token_validation is not None:
+        return token_validation
 
-    token = read_str(args, "token")
-    if token:
-        return error_result(
-            "ERC-20 send is not yet implemented; native only at this milestone.",
-            code="not_implemented",
-        )
+    decimals = _fetch_token_decimals(token, chain.chain_id)
+    try:
+        amount_base = to_base_units(amount, decimals)
+    except (ValueError, ArithmeticError) as exc:
+        return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
+
+    details: dict[str, Any] = {
+        "chain_id": chain.chain_id,
+        "chain": chain.name,
+        "to": to_addr,
+        "amount": amount,
+        "amount_base_units": str(amount_base),
+        "token": token,
+        "token_decimals": decimals,
+        "estimated_gas": _ERC20_GAS_DEFAULT,
+    }
+    if ens_name is not None:
+        details["ens_name"] = ens_name
+        details["resolved_address"] = to_addr
+    summary_target = f"{ens_name} ({to_addr})" if ens_name else to_addr
+    return json_result(
+        details,
+        summary=(
+            f"ERC-20 transfer on {chain.name}\n"
+            f"  Token:         {token} (decimals={decimals})\n"
+            f"  To:            {summary_target}\n"
+            f"  Amount:        {amount} ({amount_base} base units)\n"
+            f"  Estimated gas: {_ERC20_GAS_DEFAULT} (ceiling — actual ~50–65k)"
+        ),
+    )
+
+
+def _handle_send(args: dict[str, Any], state: Any) -> str:
+    from clawmes.services.wallet import get_wallet_service
 
     to_input = read_str(args, "to", required=True)
     amount = read_str(args, "amount", required=True)
+    token = read_str(args, "token")
     await_receipt = read_bool(args, "await_receipt", default=True)
     target_chain_id = _target_chain_id(args, state)
     chain = _lookup_chain(target_chain_id)
@@ -207,11 +262,6 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
         return resolved
     to_addr, ens_name = resolved
 
-    try:
-        value_wei = to_base_units(amount, chain.native_decimals)
-    except (ValueError, ArithmeticError) as exc:
-        return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
-
     svc = get_wallet_service()
     mode = svc.active_mode
     if mode is None:
@@ -223,17 +273,69 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             code="wallet_not_connected",
         )
 
-    try:
-        tx_hash = mode.send_transaction(
-            to=to_addr,
-            value=value_wei,
-            chain_id=chain.chain_id,
+    if token:
+        token_validation = _validate_token_address(token)
+        if token_validation is not None:
+            return token_validation
+        decimals = _fetch_token_decimals(token, chain.chain_id)
+        try:
+            amount_base = to_base_units(amount, decimals)
+        except (ValueError, ArithmeticError) as exc:
+            return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
+        # encode_transfer already returns a 0x-prefixed string
+        calldata = encode_transfer(to_addr, amount_base)
+        try:
+            tx_hash = mode.send_transaction(
+                to=token,
+                value=0,
+                data=calldata,
+                gas=_ERC20_GAS_DEFAULT,
+                chain_id=chain.chain_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface any signing/RPC error
+            return error_result(f"Transaction failed: {exc}", code="send_failed")
+        base_details = _erc20_details(
+            tx_hash=tx_hash,
+            chain=chain,
+            token=token,
+            to_addr=to_addr,
+            ens_name=ens_name,
+            amount=amount,
+            amount_base=amount_base,
+            decimals=decimals,
         )
-    except Exception as exc:  # noqa: BLE001 — surface any signing/RPC error
-        return error_result(f"Transaction failed: {exc}", code="send_failed")
+    else:
+        try:
+            value_wei = to_base_units(amount, chain.native_decimals)
+        except (ValueError, ArithmeticError) as exc:
+            return error_result(f"Bad amount {amount!r}: {exc}", code="param_error")
+        try:
+            tx_hash = mode.send_transaction(
+                to=to_addr,
+                value=value_wei,
+                chain_id=chain.chain_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface any signing/RPC error
+            return error_result(f"Transaction failed: {exc}", code="send_failed")
+        base_details = _native_details(
+            tx_hash=tx_hash,
+            chain=chain,
+            to_addr=to_addr,
+            ens_name=ens_name,
+            amount=amount,
+            value_wei=value_wei,
+        )
 
+    return _finalize_send(
+        base_details=base_details,
+        chain=chain,
+        await_receipt=await_receipt,
+    )
+
+
+def _native_details(*, tx_hash, chain, to_addr, ens_name, amount, value_wei):
     explorer_url = f"{chain.block_explorer_url}/tx/{tx_hash}"
-    base_details: dict[str, Any] = {
+    details: dict[str, Any] = {
         "tx_hash": tx_hash,
         "explorer_url": explorer_url,
         "chain_id": chain.chain_id,
@@ -245,8 +347,41 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
         "status": "pending",
     }
     if ens_name is not None:
-        base_details["ens_name"] = ens_name
-        base_details["resolved_address"] = to_addr
+        details["ens_name"] = ens_name
+        details["resolved_address"] = to_addr
+    return details
+
+
+def _erc20_details(*, tx_hash, chain, token, to_addr, ens_name, amount, amount_base, decimals):
+    explorer_url = f"{chain.block_explorer_url}/tx/{tx_hash}"
+    details: dict[str, Any] = {
+        "tx_hash": tx_hash,
+        "explorer_url": explorer_url,
+        "chain_id": chain.chain_id,
+        "chain": chain.name,
+        "to": to_addr,
+        "amount": amount,
+        "amount_base_units": str(amount_base),
+        "token": token,
+        "token_decimals": decimals,
+        "status": "pending",
+    }
+    if ens_name is not None:
+        details["ens_name"] = ens_name
+        details["resolved_address"] = to_addr
+    return details
+
+
+def _finalize_send(
+    *,
+    base_details: dict[str, Any],
+    chain,
+    await_receipt: bool,
+) -> str:
+    from clawmes.services.rpc import RpcError, get_rpc_service
+
+    tx_hash = base_details["tx_hash"]
+    explorer_url = base_details["explorer_url"]
 
     if not await_receipt:
         return json_result(
@@ -300,6 +435,33 @@ def _handle_send(args: dict[str, Any], state: Any) -> str:
             f"View: {explorer_url}"
         )
     return json_result(base_details, summary=summary)
+
+
+def _validate_token_address(token: str) -> str | None:
+    """Return an error result string if ``token`` is not a 0x address; ``None`` otherwise.
+
+    Token contracts are addressed by hex only — no ENS support
+    (resolving an ENS name to a contract address requires the user to
+    know the resolver returns the deployment, which it doesn't always
+    do). Failing fast here is friendlier than a malformed eth_call.
+    """
+    if not token.startswith(("0x", "0X")) or len(token) != 42:
+        return error_result(
+            f"Invalid token address: {token!r} — must be 0x + 40 hex chars.",
+            code="param_error",
+        )
+    return None
+
+
+def _fetch_token_decimals(token: str, chain_id: int) -> int:
+    """Return ERC-20 decimals for ``token`` on ``chain_id``.
+
+    Caches via :class:`TokenDecimalsService`; falls back to 18 on RPC
+    failure (the service handles that internally + logs).
+    """
+    from clawmes.services.token_decimals import get_token_decimals_service
+
+    return get_token_decimals_service().get(token, chain_id)
 
 
 def _resolve_recipient(to_input: str) -> tuple[str, str | None] | str:

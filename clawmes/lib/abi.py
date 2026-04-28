@@ -17,12 +17,13 @@ derived from ``keccak256("balanceOf(address)")[:4]`` /
 
 from __future__ import annotations
 
-# Function selectors (4-byte keccak256 prefixes) for the ERC-20 reads
-# we issue. Pinned as constants because they'll never change.
+# Function selectors (4-byte keccak256 prefixes) for the ERC-20 surface
+# clawmes touches. Pinned as constants because they'll never change.
 SELECTOR_BALANCE_OF = "0x70a08231"
 SELECTOR_DECIMALS = "0x313ce567"
 SELECTOR_SYMBOL = "0x95d89b41"
 SELECTOR_NAME = "0x06fdde03"
+SELECTOR_TRANSFER = "0xa9059cbb"  # transfer(address,uint256)
 
 
 def encode_address(address: str) -> str:
@@ -50,6 +51,38 @@ def encode_balance_of(address: str) -> str:
 def encode_decimals_call() -> str:
     """Build calldata for ``decimals()``."""
     return SELECTOR_DECIMALS
+
+
+def encode_uint(value: int, *, bits: int = 256) -> str:
+    """Encode an unsigned integer as a 32-byte left-padded hex string.
+
+    Returns the 64-hex-char value (no ``0x`` prefix). Negative values
+    or values exceeding ``bits`` raise ``ValueError`` — silently
+    truncating could lose money on a transfer.
+    """
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"expected int, got {type(value).__name__}")
+    if value < 0:
+        raise ValueError(f"negative value not allowed: {value}")
+    if value >= (1 << bits):
+        raise ValueError(f"value {value} exceeds uint{bits} range")
+    return format(value, "064x")
+
+
+def encode_transfer(to: str, amount: int) -> str:
+    """Build calldata for ``transfer(<to>, <amount>)``.
+
+    Returns a ``0x``-prefixed hex string suitable for ``eth_sendTransaction``
+    or :meth:`clawmes.services.rpc.RpcService.send_raw_transaction`.
+
+    The encoding is exactly:
+        ``0xa9059cbb || left_pad32(to) || left_pad32(amount)``
+
+    No tuple wrapping, no dynamic-args header — ``transfer`` has only
+    static-typed args, so the calldata is the selector followed by the
+    two 32-byte slots.
+    """
+    return SELECTOR_TRANSFER + encode_address(to) + encode_uint(amount)
 
 
 def decode_uint(hex_data: str) -> int:

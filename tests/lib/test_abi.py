@@ -9,11 +9,14 @@ from clawmes.lib.abi import (
     SELECTOR_DECIMALS,
     SELECTOR_NAME,
     SELECTOR_SYMBOL,
+    SELECTOR_TRANSFER,
     decode_uint,
     decode_uint8,
     encode_address,
     encode_balance_of,
     encode_decimals_call,
+    encode_transfer,
+    encode_uint,
 )
 
 
@@ -94,3 +97,67 @@ class TestDecodeUint8:
     def test_overflow_raises(self):
         with pytest.raises(ValueError, match="exceeds uint8 range"):
             decode_uint8("0x100")  # 256 — out of range
+
+
+class TestEncodeUint:
+    def test_zero(self):
+        assert encode_uint(0) == "0" * 64
+
+    def test_one(self):
+        assert encode_uint(1) == "0" * 63 + "1"
+
+    def test_uint256_max(self):
+        max_v = (1 << 256) - 1
+        assert encode_uint(max_v) == "f" * 64
+
+    def test_large_value(self):
+        # 1.5 * 10^18 wei (1.5 ETH)
+        v = 15 * 10**17
+        encoded = encode_uint(v)
+        assert int(encoded, 16) == v
+        assert len(encoded) == 64
+
+    def test_negative_raises(self):
+        with pytest.raises(ValueError, match="negative"):
+            encode_uint(-1)
+
+    def test_overflow_raises(self):
+        with pytest.raises(ValueError, match="exceeds uint256"):
+            encode_uint(1 << 256)
+
+    def test_bool_rejected(self):
+        with pytest.raises(ValueError, match="expected int"):
+            encode_uint(True)  # type: ignore[arg-type]
+
+    def test_non_int_rejected(self):
+        with pytest.raises(ValueError, match="expected int"):
+            encode_uint("0x1")  # type: ignore[arg-type]
+
+
+class TestEncodeTransfer:
+    def test_basic(self):
+        # transfer(0xaaaa...aaaa, 1)
+        addr = "0x" + "a" * 40
+        out = encode_transfer(addr, 1)
+        assert out.startswith(SELECTOR_TRANSFER)
+        # selector (8 hex) + address (64 hex) + amount (64 hex) = 136 chars
+        # plus '0x' prefix from selector = 138 total
+        assert len(out) == 2 + 8 + 64 + 64
+        # Address slot is right-padded
+        assert out[10 : 10 + 64].endswith("a" * 40)
+        # Amount slot encodes 1
+        assert int(out[-64:], 16) == 1
+
+    def test_zero_amount(self):
+        # Encoding zero amount is legal (though usually a logic bug)
+        addr = "0x" + "1" * 40
+        out = encode_transfer(addr, 0)
+        assert int(out[-64:], 16) == 0
+
+    def test_invalid_address_propagates(self):
+        with pytest.raises(ValueError):
+            encode_transfer("not-an-address", 1)
+
+    def test_negative_amount_propagates(self):
+        with pytest.raises(ValueError):
+            encode_transfer("0x" + "a" * 40, -1)
