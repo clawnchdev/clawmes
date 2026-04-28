@@ -27,7 +27,16 @@ def register_all(ctx) -> None:
     catalog. Most-used tools first. The full 48-tool roster comes online
     across v0.1.0 → v0.5.0; this list grows as each tool module lands.
     """
-    from clawmes.tools import block_explorer, defi_balance, defi_price, transfer
+    from clawmes.tools import (
+        block_explorer,
+        clawnchconnect,
+        defi_balance,
+        defi_price,
+        transfer,
+    )
 
-    for mod in (transfer, defi_price, defi_balance, block_explorer):
+    # clawnchconnect first — the LLM should reach for it whenever a
+    # write tool errors with wallet_not_connected, so it benefits from
+    # being early in the tool catalog.
+    for mod in (clawnchconnect, transfer, defi_price, defi_balance, block_explorer):
         mod.register(ctx)
