@@ -38,6 +38,7 @@ def start_all() -> None:
     crashing.
     """
     from clawmes.plans.scheduler import get_scheduler
+    from clawmes.services.bankr_service import get_bankr_service
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.credential_redactor import get_credential_redactor
     from clawmes.services.explorer import get_explorer_service
@@ -73,6 +74,9 @@ def start_all() -> None:
         # 6. Market data — exercised by tools and triggers.
         get_coingecko_service,
         get_price_service,  # depends on coingecko
+        # 6a. Bankr custodial-wallet HTTP client — read-only without
+        #     BANKR_API_KEY; signing requires it.
+        get_bankr_service,
         # 7. Background daemons — last so they pick up everything above.
         get_scheduler,  # ticking=True; needs cron driver to actually fire
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs

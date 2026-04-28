@@ -18,11 +18,13 @@ from clawmes.wallet.local_key import KEYRING_SERVICE, LocalKeyMode
 from clawmes.wallet.state import WalletState
 from clawmes.wallet.walletconnect import WalletConnectMode, _to_hex
 
-# Bankr stub-mode invariants ----------------------------------------------
+# Bankr mode invariants ---------------------------------------------------
 
 
-class TestBankrStub:
-    """Bankr mode is still a stub — sign methods raise NotImplementedError."""
+class TestBankrShape:
+    """Bankr mode is now wired through bankr_service. These tests cover
+    the no-credentials / not-connected paths; full happy-path tests
+    live in TestBankrModeWithService below."""
 
     def test_subclass_of_base(self):
         assert issubclass(BankrMode, WalletMode)
@@ -37,26 +39,137 @@ class TestBankrStub:
         assert isinstance(s, WalletState)
         assert s.connected is False
 
-    def test_connect_returns_state(self):
-        m = BankrMode()
-        s = m.connect()
-        assert isinstance(s, WalletState)
-
     def test_disconnect_idempotent(self):
         m = BankrMode()
         m.disconnect()
         m.disconnect()
         assert m.state().connected is False
 
-    def test_send_transaction_raises_not_implemented(self):
+    def test_send_transaction_when_disconnected(self):
+        from clawmes.services.bankr_service import BankrError
+
         m = BankrMode()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(BankrError, match="Bankr wallet not connected"):
             m.send_transaction(to="0x" + "a" * 40, value=10**18)
 
-    def test_sign_typed_data_raises_not_implemented(self):
+    def test_sign_typed_data_when_disconnected(self):
+        from clawmes.services.bankr_service import BankrError
+
         m = BankrMode()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(BankrError, match="Bankr wallet not connected"):
             m.sign_typed_data_v4({"types": {}})
+
+    def test_sign_personal_when_disconnected(self):
+        from clawmes.services.bankr_service import BankrError
+
+        m = BankrMode()
+        with pytest.raises(BankrError, match="Bankr wallet not connected"):
+            m.sign_personal_message("hello")
+
+
+class TestBankrModeWithService:
+    """Wire BankrMode against a fake bankr_service for the happy path."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, monkeypatch):
+        from clawmes.services import bankr_service as bs_mod
+
+        fake = MagicMock()
+        fake.has_credentials = True
+        fake.get_account.return_value = {
+            "user_id": "u1",
+            "tier": "pro",
+            "addresses": {"1": "0x" + "a" * 40, "8453": "0x" + "b" * 40},
+        }
+        fake.send_transaction.return_value = "0xfeed"
+        fake.sign_typed_data_v4.return_value = "0xtypedsig"
+        fake.sign_personal_message.return_value = "0xpersonalsig"
+        monkeypatch.setattr(bs_mod, "_instance", fake)
+        return fake
+
+    def test_connect_picks_default_chain(self, _isolate):
+        m = BankrMode()
+        state = m.connect()
+        assert state.connected is True
+        assert state.chain_id == 8453
+        assert state.address == "0x" + "b" * 40
+        assert state.chain_name == "Base"
+
+    def test_connect_explicit_chain(self, _isolate):
+        m = BankrMode()
+        state = m.connect(chain_id=1)
+        assert state.chain_id == 1
+        assert state.address == "0x" + "a" * 40
+
+    def test_connect_unknown_chain_falls_through(self, _isolate, monkeypatch):
+        # Inject an addresses map with an unknown chain id
+        from clawmes.services import bankr_service as bs_mod
+
+        bs_mod._instance.get_account.return_value = {
+            "addresses": {"999999": "0x" + "c" * 40},
+        }
+        m = BankrMode()
+        state = m.connect(chain_id=999999)
+        assert state.chain_name == "chain 999999"
+
+    def test_connect_no_address_for_chain(self, _isolate, monkeypatch):
+        from clawmes.services import bankr_service as bs_mod
+        from clawmes.services.bankr_service import BankrError
+
+        bs_mod._instance.get_account.return_value = {"addresses": {}}
+        m = BankrMode()
+        with pytest.raises(BankrError, match="no address for chain"):
+            m.connect(chain_id=8453)
+
+    def test_connect_propagates_bankr_error(self, _isolate, monkeypatch):
+        from clawmes.services import bankr_service as bs_mod
+        from clawmes.services.bankr_service import BankrError
+
+        bs_mod._instance.get_account.side_effect = BankrError("no_credentials", "no key")
+        m = BankrMode()
+        with pytest.raises(BankrError) as exc_info:
+            m.connect()
+        assert exc_info.value.code == "no_credentials"
+
+    def test_send_transaction(self, _isolate):
+        m = BankrMode()
+        m.connect()
+        result = m.send_transaction(
+            to="0x" + "1" * 40,
+            value=10**18,
+            data=b"\xab",
+            gas=21000,
+            max_fee_per_gas=10**10,
+            max_priority_fee_per_gas=10**9,
+        )
+        assert result == "0xfeed"
+        # Service was called with the right shape
+        call = _isolate.send_transaction.call_args
+        assert call.kwargs["chain_id"] == 8453
+        assert call.kwargs["to"] == "0x" + "1" * 40
+        assert call.kwargs["value"] == 10**18
+        assert call.kwargs["gas"] == 21000
+
+    def test_send_transaction_explicit_chain(self, _isolate):
+        m = BankrMode()
+        m.connect()
+        m.send_transaction(to="0x" + "1" * 40, value=0, chain_id=1)
+        call = _isolate.send_transaction.call_args
+        assert call.kwargs["chain_id"] == 1
+
+    def test_sign_typed_data(self, _isolate):
+        m = BankrMode()
+        m.connect()
+        sig = m.sign_typed_data_v4({"types": {}})
+        assert sig == "0xtypedsig"
+        _isolate.sign_typed_data_v4.assert_called_once()
+
+    def test_sign_personal_message(self, _isolate):
+        m = BankrMode()
+        m.connect()
+        sig = m.sign_personal_message("hello")
+        assert sig == "0xpersonalsig"
+        _isolate.sign_personal_message.assert_called_once()
 
 
 # WalletConnect tests -----------------------------------------------------

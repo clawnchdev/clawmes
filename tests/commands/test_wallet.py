@@ -154,6 +154,67 @@ class TestConnect:
         assert "not yet implemented" in out
 
 
+class TestConnectBankr:
+    @pytest.mark.asyncio
+    async def test_connect_bankr_success(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+
+        svc = wallet_svc.get_wallet_service()
+        monkeypatch.setattr(
+            svc,
+            "connect_bankr",
+            lambda: WalletState(
+                connected=True,
+                mode="bankr",
+                address="0x" + "b" * 40,
+                chain_id=8453,
+                chain_name="Base",
+            ),
+        )
+        out = await wallet_cmd.handle_connect_bankr("")
+        assert "Bankr wallet connected" in out
+        assert "0x" + "b" * 40 in out
+        assert "Base" in out
+
+    @pytest.mark.asyncio
+    async def test_connect_bankr_no_credentials(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.services.bankr_service import BankrError
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def boom():
+            raise BankrError("no_credentials", "no key")
+
+        monkeypatch.setattr(svc, "connect_bankr", boom)
+        out = await wallet_cmd.handle_connect_bankr("")
+        assert "BANKR_API_KEY" in out
+        assert "bankr.bot" in out
+
+    @pytest.mark.asyncio
+    async def test_connect_bankr_other_error(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.services.bankr_service import BankrError
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def boom():
+            raise BankrError("network", "relay down")
+
+        monkeypatch.setattr(svc, "connect_bankr", boom)
+        out = await wallet_cmd.handle_connect_bankr("")
+        assert "Bankr connect failed" in out
+        assert "relay down" in out
+
+
 class TestMode:
     @pytest.mark.asyncio
     async def test_show_current_mode(self, disconnected_state):
@@ -229,7 +290,7 @@ class TestAddress:
 
 
 class TestRegister:
-    def test_registers_six_commands(self):
+    def test_registers_seven_commands(self):
         recorded = []
 
         class FakeCtx:
@@ -240,6 +301,7 @@ class TestRegister:
         assert set(recorded) == {
             "wallet",
             "connect",
+            "connect_bankr",
             "disconnect",
             "mode",
             "chain",

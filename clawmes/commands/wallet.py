@@ -55,6 +55,29 @@ async def handle_connect(raw_args: str) -> str:
     )
 
 
+async def handle_connect_bankr(raw_args: str) -> str:
+    from clawmes.services.bankr_service import BankrError
+    from clawmes.services.wallet import get_wallet_service
+
+    svc = get_wallet_service()
+    try:
+        state = svc.connect_bankr()
+    except BankrError as exc:
+        if exc.code == "no_credentials":
+            return (
+                "Bankr wallet requires BANKR_API_KEY. Sign up at "
+                "https://bankr.bot and set the key in ~/.hermes/.env."
+            )
+        return f"Bankr connect failed: {exc.message}"
+
+    return (
+        f"Bankr wallet connected.\n"
+        f"  Address: {state.address}\n"
+        f"  Chain:   {state.chain_name}\n"
+        f"  Mode:    bankr (custodial)"
+    )
+
+
 async def handle_disconnect(raw_args: str) -> str:
     state = get_wallet_state()
     if not state.connected:
@@ -100,6 +123,11 @@ def register(ctx) -> None:
         name="connect",
         handler=handle_connect,
         description="Pair a wallet via WalletConnect v2",
+    )
+    ctx.register_command(
+        name="connect_bankr",
+        handler=handle_connect_bankr,
+        description="Connect a Bankr custodial wallet",
     )
     ctx.register_command(
         name="disconnect",

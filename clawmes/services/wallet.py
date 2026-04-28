@@ -87,6 +87,22 @@ class WalletService(Service):
             _log.exception("wallet mode state() raised; returning disconnected")
             return WalletState.disconnected()
 
+    # --- Bankr convenience ----------------------------------------------
+
+    def connect_bankr(self, *, chain_id: int = 8453) -> WalletState:
+        """Materialize a Bankr custodial wallet mode and connect.
+
+        Reads ``BANKR_API_KEY`` from env (the Bankr service handles
+        that). Raises :class:`BankrError` (``no_credentials``) if
+        the key isn't set; the command layer surfaces a friendly
+        message.
+        """
+        from clawmes.wallet.bankr import BankrMode
+
+        mode = BankrMode()
+        self.set_mode(mode)
+        return mode.connect(chain_id=chain_id)
+
     # --- WalletConnect convenience --------------------------------------
 
     def connect_walletconnect(self) -> WalletState:

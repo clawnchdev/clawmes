@@ -121,6 +121,37 @@ class TestSingleton:
         assert state.connected is False
 
 
+class TestConnectBankr:
+    def test_creates_bankr_mode_and_connects(self, monkeypatch):
+        from clawmes.services import bankr_service as bs_mod
+
+        fake_bankr = MagicMock()
+        fake_bankr.get_account.return_value = {
+            "addresses": {"8453": "0x" + "b" * 40},
+        }
+        monkeypatch.setattr(bs_mod, "_instance", fake_bankr)
+
+        svc = WalletService()
+        state = svc.connect_bankr()
+        assert state.connected is True
+        assert state.mode == "bankr"
+        assert state.chain_id == 8453
+        assert svc.active_mode is not None
+
+    def test_connect_bankr_propagates_no_credentials(self, monkeypatch):
+        from clawmes.services import bankr_service as bs_mod
+        from clawmes.services.bankr_service import BankrError
+
+        fake_bankr = MagicMock()
+        fake_bankr.get_account.side_effect = BankrError("no_credentials", "key not set")
+        monkeypatch.setattr(bs_mod, "_instance", fake_bankr)
+
+        svc = WalletService()
+        with pytest.raises(BankrError) as exc_info:
+            svc.connect_bankr()
+        assert exc_info.value.code == "no_credentials"
+
+
 class TestConnectWalletConnect:
     def test_no_bridge_raises_config_error(self, monkeypatch):
         from clawmes.bridges import installer

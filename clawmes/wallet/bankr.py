@@ -1,14 +1,12 @@
 """Bankr custodial wallet mode.
 
-Multi-chain custodial wallet with on-chain account abstraction. Uses
-HTTP API at ``api.bankr.bot``. Required for:
+Routes every wallet operation through the Bankr HTTP API
+(:mod:`clawmes.services.bankr_service`). Bankr signs and submits
+transactions on the user's behalf — clawmes never sees a private key
+in this mode.
 
-  * Avantis leverage (1-10x long/short)
-  * Polymarket prediction markets (Polygon)
-  * Token launches via Bankr's gas-sponsored deploy flow
-
-Configuration: ``BANKR_API_KEY`` env. Optional ``BANKR_LLM_KEY`` for
-the inference-credit gateway.
+Configuration: ``BANKR_API_KEY`` env var. Without it, ``connect``
+raises a clear error and the user can switch to WC or local-key mode.
 """
 
 from __future__ import annotations
@@ -16,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from clawmes.lib.logger import logger_for
+from clawmes.services.bankr_service import BankrError, get_bankr_service
 from clawmes.wallet._base import WalletMode
 from clawmes.wallet.state import WalletState
 
@@ -25,14 +24,54 @@ _log = logger_for("wallet.bankr")
 class BankrMode(WalletMode):
     name = "bankr"
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, *, api_key: str | None = None) -> None:
+        # ``api_key`` is accepted for API symmetry but the service
+        # singleton reads the env var on its own start. Tests can
+        # inject a fake service via clawmes.services.bankr_service._instance.
         self._api_key = api_key
         self._state = WalletState.disconnected()
 
+    # --- lifecycle ----------------------------------------------------
+
     def connect(self, **kwargs: Any) -> WalletState:
-        # TODO(v0.1.0): GET /account with the API key, materialize
-        # WalletState including all chain addresses.
-        _log.info("bankr connect requested (stub)")
+        """Authenticate to Bankr and materialize wallet state.
+
+        Reads the user's account metadata; picks the address for the
+        requested chain (or default 8453 = Base) and sets state to
+        ``connected``.
+        """
+        chain_id = int(kwargs.get("chain_id") or 8453)
+        svc = get_bankr_service()
+        try:
+            account = svc.get_account()
+        except BankrError as exc:
+            _log.warning("bankr connect failed: %s", exc)
+            raise
+
+        addresses = account.get("addresses") or {}
+        # Bankr returns chain ids as string keys
+        address = addresses.get(str(chain_id)) or addresses.get(chain_id)
+        if not isinstance(address, str) or not address:
+            raise BankrError(
+                "no_address",
+                f"Bankr account has no address for chain {chain_id}",
+            )
+
+        from clawmes.lib.chains import get_chain
+
+        try:
+            chain_name = get_chain(chain_id).name
+        except KeyError:
+            chain_name = f"chain {chain_id}"
+
+        self._state = WalletState(
+            connected=True,
+            mode="bankr",
+            address=address,
+            chain_id=chain_id,
+            chain_name=chain_name,
+        )
+        _log.info("bankr wallet connected: %s on %s", address, chain_name)
         return self._state
 
     def disconnect(self) -> None:
@@ -40,6 +79,8 @@ class BankrMode(WalletMode):
 
     def state(self) -> WalletState:
         return self._state
+
+    # --- signing ------------------------------------------------------
 
     def send_transaction(
         self,
@@ -52,10 +93,33 @@ class BankrMode(WalletMode):
         max_fee_per_gas: int | None = None,
         max_priority_fee_per_gas: int | None = None,
     ) -> str:
-        raise NotImplementedError(
-            "Bankr send not wired in this milestone. "
-            "Forthcoming: POST /tx via services.bankr_service."
+        if not self._state.connected:
+            raise BankrError("not_connected", "Bankr wallet not connected")
+        target_chain = chain_id or self._state.chain_id or 8453
+        # Bankr's send endpoint manages gas/fees internally; we ignore
+        # max_fee_per_gas + max_priority_fee_per_gas at the API layer.
+        # If the user wants explicit gas, they can pass `gas`.
+        del max_fee_per_gas, max_priority_fee_per_gas
+        return get_bankr_service().send_transaction(
+            chain_id=target_chain,
+            to=to,
+            value=value,
+            data=data,
+            gas=gas,
         )
 
     def sign_typed_data_v4(self, typed_data: dict[str, Any]) -> str:
-        raise NotImplementedError("Bankr typed-data signing not wired in this milestone.")
+        if not self._state.connected:
+            raise BankrError("not_connected", "Bankr wallet not connected")
+        return get_bankr_service().sign_typed_data_v4(
+            typed_data,
+            chain_id=self._state.chain_id,
+        )
+
+    def sign_personal_message(self, message: bytes | str) -> str:
+        if not self._state.connected:
+            raise BankrError("not_connected", "Bankr wallet not connected")
+        return get_bankr_service().sign_personal_message(
+            message,
+            chain_id=self._state.chain_id,
+        )
