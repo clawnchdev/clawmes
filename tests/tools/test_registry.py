@@ -208,6 +208,74 @@ class TestStage1ReadonlyMode:
         assert "isError" not in out
 
 
+class TestStage2AmountToWei:
+    def test_amount_alone_triggers_value_gate(self):
+        """Without explicit value_wei, an amount-only call should still
+        trigger a value-quantitative gate. Previously the gate would
+        skip amount and silently let large transfers through; the
+        registry now extracts wei from amount for native transfers."""
+
+        @write_tool(
+            name="t_amount_gate",
+            toolset="t",
+            description="d",
+            schema=SAMPLE_SCHEMA,
+        )
+        def fn(args, **kw):
+            return json_result({"ran": True})
+
+        policy_storage.save_policies(
+            [
+                Policy(
+                    name="big-transfer",
+                    decision="block",
+                    applies_to_tools=("t_amount_gate",),
+                    max_amount_wei=10**16,  # 0.01 ETH
+                )
+            ]
+        )
+        # 0.5 ETH > 0.01 ETH → block
+        out = json.loads(fn({"amount": "0.5", "to": "0xabc"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "policy_block"
+
+    def test_token_transfer_skips_amount_gate(self):
+        """ERC-20 transfers — the gate cannot safely convert amount to
+        wei without a decimals lookup. The gate should not fire (no
+        false positives) even when the amount string is large."""
+
+        @write_tool(
+            name="t_amount_token_skip",
+            toolset="t",
+            description="d",
+            schema=SAMPLE_SCHEMA,
+        )
+        def fn(args, **kw):
+            return json_result({"ran": True})
+
+        policy_storage.save_policies(
+            [
+                Policy(
+                    name="big-transfer",
+                    decision="block",
+                    applies_to_tools=("t_amount_token_skip",),
+                    max_amount_wei=10**16,
+                )
+            ]
+        )
+        # ERC-20: token field present → gate skips amount; tool runs.
+        out = json.loads(
+            fn(
+                {
+                    "amount": "1000000",
+                    "token": "0x" + "2" * 40,
+                    "to": "0xabc",
+                }
+            )
+        )
+        assert "isError" not in out
+
+
 class TestStage2PolicyBlock:
     def test_policy_block(self):
         @write_tool(name="t_pol_block", toolset="t", description="d", schema=SAMPLE_SCHEMA)
@@ -397,3 +465,37 @@ class TestExtractHelpers:
     def test_extract_value_wei_all_invalid_returns_none(self):
         # Every candidate key has a non-int value
         assert _extract_value_wei({"value_wei": "x", "amount_wei": "y"}) is None
+
+    def test_extract_value_wei_from_amount_native(self):
+        # Native transfer (no token) — convert via 18 decimals
+        assert _extract_value_wei({"amount": "1.5", "to": "0xabc"}) == 15 * 10**17
+
+    def test_extract_value_wei_from_amount_zero(self):
+        # Zero is a valid native value; the gate should report 0, not None
+        assert _extract_value_wei({"amount": "0", "to": "0xabc"}) == 0
+
+    def test_extract_value_wei_token_present_skips_amount(self):
+        # ERC-20 — decimals unknown at gate level, skip amount conversion
+        assert (
+            _extract_value_wei({"amount": "100", "token": "0x" + "2" * 40, "to": "0xabc"}) is None
+        )
+
+    def test_extract_value_wei_amount_takes_priority_below_explicit(self):
+        # If both value_wei and amount are set, value_wei wins (it's
+        # the more explicit signal)
+        assert _extract_value_wei({"value_wei": 10**18, "amount": "999", "to": "0xabc"}) == 10**18
+
+    def test_extract_value_wei_amount_invalid_returns_none(self):
+        # Garbage amount falls through silently — gate just won't fire
+        assert _extract_value_wei({"amount": "not-a-number", "to": "0xabc"}) is None
+
+    def test_extract_value_wei_amount_negative_returns_none(self):
+        # to_base_units rejects negatives; we treat as missing
+        assert _extract_value_wei({"amount": "-1", "to": "0xabc"}) is None
+
+    def test_extract_value_wei_amount_empty_string(self):
+        assert _extract_value_wei({"amount": "", "to": "0xabc"}) is None
+
+    def test_extract_value_wei_amount_with_empty_token(self):
+        # Empty-string token is treated as 'no token' — native fallback fires
+        assert _extract_value_wei({"amount": "1", "token": "", "to": "0xabc"}) == 10**18

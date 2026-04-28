@@ -152,14 +152,20 @@ def _extract_chain_id(args: dict[str, Any] | None) -> int | None:
 def _extract_value_wei(args: dict[str, Any] | None) -> int | None:
     """Best-effort extraction of the wei value at risk.
 
-    Looks at common arg names — ``value_wei``, ``amount_wei``,
-    ``amount`` — and converts. ``amount`` is human-readable so it
-    requires a token decimals lookup we don't have here; we conservatively
-    skip it and leave the policy gate to the per-tool layer for that case.
+    Order of preference:
 
-    Returns None when the arg shape doesn't map cleanly. Policy
-    quantitative gates that depend on value_wei silently won't fire on
-    None; callers that need a strict gate should set the arg explicitly.
+    1. Explicit ``value_wei`` / ``amount_wei`` — caller knows the gate
+       will quantify on this exact integer.
+    2. ``amount`` for a native transfer (no ``token`` arg) — every
+       chain in our registry uses 18 decimals for the gas token, so we
+       can convert without an RPC round-trip and without needing the
+       chain id. ERC-20 transfers (``token`` present) are skipped here:
+       converting requires a decimals lookup which can't safely be a
+       blocking call inside the policy gate.
+
+    Returns ``None`` when none of these paths produce an integer.
+    Quantitative gates silently won't fire on ``None``; callers that
+    require a strict gate should set ``value_wei`` explicitly.
     """
     if not args:
         return None
@@ -171,7 +177,19 @@ def _extract_value_wei(args: dict[str, Any] | None) -> int | None:
             return int(raw)
         except (TypeError, ValueError):
             continue
-    return None
+
+    # Native-only fallback: convert ``amount`` assuming 18 decimals.
+    if args.get("token"):
+        return None
+    amount_raw = args.get("amount")
+    if amount_raw is None or amount_raw == "":
+        return None
+    try:
+        from clawmes.lib.decimals import to_base_units
+
+        return to_base_units(amount_raw, 18)
+    except (ValueError, ArithmeticError, TypeError):
+        return None
 
 
 def read_tool(
