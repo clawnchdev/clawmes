@@ -47,6 +47,89 @@ class TestStartStop:
         assert 1 in ids
         assert 8453 in ids
 
+    def test_default_endpoints_use_official_public_rpcs(self, rpc):
+        # Defaults must NOT use Alchemy demo URLs (they rate-limit
+        # aggressively and break the first-run experience).
+        from clawmes.services.rpc import _DEFAULT_ENDPOINTS
+
+        for url in _DEFAULT_ENDPOINTS.values():
+            assert "/demo" not in url, f"default RPC {url} still uses Alchemy demo"
+            assert "alchemy" not in url, f"default RPC {url} still routes through Alchemy"
+
+    def test_is_default_endpoint_for_unconfigured(self, rpc):
+        assert rpc.is_default_endpoint(1) is True
+        assert rpc.is_default_endpoint(8453) is True
+
+    def test_is_default_endpoint_for_user_override(self, monkeypatch):
+        from clawmes.services.rpc import RpcService
+
+        monkeypatch.setenv("CLAWMES_RPC_8453", "https://my-private-base.example.com")
+        # Network allowlist would normally reject this domain, but
+        # is_default_endpoint only inspects which slot we picked, not
+        # whether the URL works.
+        svc = RpcService()
+        svc.start()
+        assert svc.is_default_endpoint(8453) is False
+        assert svc.is_default_endpoint(1) is True  # still default
+
+    def test_is_default_endpoint_unknown_chain(self, rpc):
+        assert rpc.is_default_endpoint(999_999) is False
+
+    def _capture_clawmes_logs(self, monkeypatch):
+        """Attach a recorder handler to the clawmes logger.
+
+        The clawmes logger has ``propagate=False`` so pytest's caplog
+        (which hooks the root logger) doesn't see its records. We
+        attach our own handler instead.
+        """
+        import logging
+
+        records: list[logging.LogRecord] = []
+        handler = logging.Handler()
+        handler.emit = records.append  # type: ignore[assignment]
+        clawmes_root = logging.getLogger("clawmes")
+        clawmes_root.addHandler(handler)
+        # Cleanup via monkeypatch's reset
+        monkeypatch.setattr(
+            handler,
+            "_cleanup",
+            lambda: clawmes_root.removeHandler(handler),
+            raising=False,
+        )
+        return records, handler, clawmes_root
+
+    def test_start_logs_default_warning(self, monkeypatch):
+        # When at least one chain is on the default endpoint, startup
+        # emits a warning so the user sees the rate-limit caveat.
+        import logging
+
+        from clawmes.services.rpc import RpcService
+
+        for cid in (1, 8453, 42161, 10, 137):
+            monkeypatch.delenv(f"CLAWMES_RPC_{cid}", raising=False)
+        records, handler, clawmes_root = self._capture_clawmes_logs(monkeypatch)
+        try:
+            RpcService().start()
+        finally:
+            clawmes_root.removeHandler(handler)
+        msgs = [r.getMessage() for r in records if r.levelno == logging.WARNING]
+        assert any("public-node default" in m for m in msgs), msgs
+
+    def test_start_no_warning_when_all_overridden(self, monkeypatch):
+        import logging
+
+        from clawmes.services.rpc import RpcService
+
+        for cid in (1, 8453, 42161, 10, 137):
+            monkeypatch.setenv(f"CLAWMES_RPC_{cid}", f"https://rpc-{cid}.example.com")
+        records, handler, clawmes_root = self._capture_clawmes_logs(monkeypatch)
+        try:
+            RpcService().start()
+        finally:
+            clawmes_root.removeHandler(handler)
+        msgs = [r.getMessage() for r in records if r.levelno == logging.WARNING]
+        assert not any("public-node default" in m for m in msgs)
+
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("CLAWMES_RPC_8453", "https://eth-mainnet.g.alchemy.com/custom")
         svc = RpcService()

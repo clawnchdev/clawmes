@@ -178,6 +178,56 @@ class TestRunStatus:
         assert "Bridges installed" in out
         assert "wc + sa" in out
 
+    def test_rpc_check_warns_on_defaults(self, capsys, monkeypatch, all_green):
+        from clawmes.cli import doctor as doc
+        from clawmes.services import rpc as rpc_mod
+
+        # Force a fresh RpcService with no env overrides — all chains
+        # on default endpoints.
+        monkeypatch.setattr(rpc_mod, "_instance", None)
+        for cid in (1, 8453, 42161, 10, 137):
+            monkeypatch.delenv(f"CLAWMES_RPC_{cid}", raising=False)
+        monkeypatch.setattr(doc, "get_wallet_state", lambda: WalletState.disconnected())
+
+        doc.run(_ns())
+        out = capsys.readouterr().out
+        assert "RPC endpoints" in out
+        assert "public defaults" in out
+
+    def test_rpc_check_fail_when_no_chains(self, capsys, monkeypatch, all_green):
+        # Pathological state: an RpcService with no endpoints at all.
+        # Defensive branch — practically unreachable since defaults
+        # always populate, but covered to lock in the behavior.
+        from clawmes.cli import doctor as doc
+        from clawmes.services import rpc as rpc_mod
+        from clawmes.services.rpc import RpcService
+
+        empty = RpcService()
+        # Skip start() so endpoints stay empty
+        monkeypatch.setattr(rpc_mod, "_instance", empty)
+        monkeypatch.setattr(doc, "get_wallet_state", lambda: WalletState.disconnected())
+
+        # Patch start so the doctor's call doesn't repopulate
+        monkeypatch.setattr(empty, "start", lambda: None)
+        rc = doc.run(_ns())
+        out = capsys.readouterr().out
+        assert "no chains configured" in out
+        assert rc == 1  # 'fail' status sets non-zero exit
+
+    def test_rpc_check_ok_when_all_configured(self, capsys, monkeypatch, all_green):
+        from clawmes.cli import doctor as doc
+        from clawmes.services import rpc as rpc_mod
+
+        monkeypatch.setattr(rpc_mod, "_instance", None)
+        for cid in (1, 8453, 42161, 10, 137):
+            monkeypatch.setenv(f"CLAWMES_RPC_{cid}", f"https://rpc-{cid}.example.com")
+        monkeypatch.setattr(doc, "get_wallet_state", lambda: WalletState.disconnected())
+
+        doc.run(_ns())
+        out = capsys.readouterr().out
+        assert "RPC endpoints" in out
+        assert "all 5 user-configured" in out
+
     def test_hermes_not_importable(self, capsys, monkeypatch, node_available):
         """Cover the ImportError branch in _gather_checks."""
         import sys

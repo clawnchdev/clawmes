@@ -37,14 +37,19 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         "api.0x.org",
         "api.1inch.dev",
         "li.quest",
-        # RPCs (Alchemy, Infura, Ankr, public)
+        # RPCs — paid providers
         "eth-mainnet.g.alchemy.com",
         "base-mainnet.g.alchemy.com",
         "arb-mainnet.g.alchemy.com",
         "opt-mainnet.g.alchemy.com",
         "polygon-mainnet.g.alchemy.com",
         "rpc.ankr.com",
+        # RPCs — official chain-team public endpoints (the new defaults)
+        "ethereum-rpc.publicnode.com",
         "mainnet.base.org",
+        "arb1.arbitrum.io",
+        "mainnet.optimism.io",
+        "polygon-rpc.com",
         # Price feeds + market data
         "api.coingecko.com",
         "api.dexscreener.com",

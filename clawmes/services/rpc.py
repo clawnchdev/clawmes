@@ -37,15 +37,26 @@ from clawmes.services._base import Service
 _log = logger_for("services.rpc")
 
 
-# Default endpoints — public RPCs that don't require API keys. Users
-# should override via clawmes.rpc.<chain_id> in config.yaml or via
-# CLAWMES_RPC_<CHAIN_ID> env vars for production traffic.
+# Default endpoints — official public RPCs run by each chain's team.
+# Higher capacity than Alchemy's /demo endpoint (which throttles
+# aggressively) but still not production-grade. Users running real
+# traffic should override via clawmes.rpc.<chain_id> in config.yaml or
+# via CLAWMES_RPC_<CHAIN_ID> env vars.
+#
+# We surface a startup warning when any default endpoint is in use so
+# the user sees the rate-limit caveat instead of debugging timeouts
+# on their own.
 _DEFAULT_ENDPOINTS: dict[int, str] = {
-    1: "https://eth-mainnet.g.alchemy.com/v2/demo",
-    8453: "https://base-mainnet.g.alchemy.com/v2/demo",
-    42161: "https://arb-mainnet.g.alchemy.com/v2/demo",
-    10: "https://opt-mainnet.g.alchemy.com/v2/demo",
-    137: "https://polygon-mainnet.g.alchemy.com/v2/demo",
+    # Ethereum mainnet — public node with no auth required
+    1: "https://ethereum-rpc.publicnode.com",
+    # Base — official public RPC
+    8453: "https://mainnet.base.org",
+    # Arbitrum One — official public RPC
+    42161: "https://arb1.arbitrum.io/rpc",
+    # Optimism — official public RPC
+    10: "https://mainnet.optimism.io",
+    # Polygon — official public RPC
+    137: "https://polygon-rpc.com",
 }
 
 
@@ -63,6 +74,7 @@ class RpcError(RuntimeError):
 class _Endpoint:
     chain_id: int
     url: str
+    is_default: bool
 
 
 class RpcService(Service):
@@ -85,9 +97,25 @@ class RpcService(Service):
     def start(self) -> None:
         with self._lock:
             self._endpoints = self._discover_endpoints()
-            _log.info(
-                "rpc service started; endpoints configured for chains %s",
-                sorted(self._endpoints.keys()),
+            user_configured = sorted(
+                cid for cid, ep in self._endpoints.items() if not ep.is_default
+            )
+            on_defaults = sorted(cid for cid, ep in self._endpoints.items() if ep.is_default)
+        _log.info(
+            "rpc service started; user-configured chains %s, on-default chains %s",
+            user_configured,
+            on_defaults,
+        )
+        if on_defaults:
+            # Single warning at startup so users see the cost / capacity
+            # caveat without having to grep for it after the first
+            # rate-limit error.
+            _log.warning(
+                "Using public-node default RPCs for chains %s. "
+                "These work for casual reads but rate-limit aggressively; "
+                "set CLAWMES_RPC_<chain_id> (e.g. CLAWMES_RPC_8453) to "
+                "your own provider URL for any real workload.",
+                on_defaults,
             )
 
     def stop(self) -> None:
@@ -270,9 +298,23 @@ class RpcService(Service):
         out: dict[int, _Endpoint] = {}
         for chain_id, default in _DEFAULT_ENDPOINTS.items():
             override = os.environ.get(f"CLAWMES_RPC_{chain_id}")
-            url = override or default
-            out[chain_id] = _Endpoint(chain_id=chain_id, url=url)
+            if override:
+                out[chain_id] = _Endpoint(chain_id=chain_id, url=override, is_default=False)
+            else:
+                out[chain_id] = _Endpoint(chain_id=chain_id, url=default, is_default=True)
         return out
+
+    def is_default_endpoint(self, chain_id: int) -> bool:
+        """Return True if the configured RPC for ``chain_id`` is the
+        public-node default (not a user override).
+
+        Used by the doctor command to surface a "you're on a public
+        node" hint and by tools that want to soft-warn before issuing
+        large reads against a rate-limited endpoint.
+        """
+        with self._lock:
+            ep = self._endpoints.get(chain_id)
+        return ep is not None and ep.is_default
 
 
 _instance: RpcService | None = None

@@ -125,4 +125,27 @@ def _gather_checks() -> list[tuple[str, str, str]]:
             )
         )
 
+    # RPC endpoints — surface which chains are on the public-node
+    # default vs user-configured. Defaults are workable but rate-limit
+    # under any real load.
+    from clawmes.services.rpc import get_rpc_service
+
+    rpc = get_rpc_service()
+    rpc.start()
+    chain_ids = rpc.configured_chain_ids()
+    on_default = [cid for cid in chain_ids if rpc.is_default_endpoint(cid)]
+    if not chain_ids:
+        out.append(("RPC endpoints", "fail", "no chains configured"))
+    elif on_default:
+        out.append(
+            (
+                "RPC endpoints",
+                "warn",
+                f"{len(chain_ids) - len(on_default)}/{len(chain_ids)} user-configured; "
+                f"chains on public defaults: {on_default}",
+            )
+        )
+    else:
+        out.append(("RPC endpoints", "ok", f"all {len(chain_ids)} user-configured"))
+
     return out
