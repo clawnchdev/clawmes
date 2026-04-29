@@ -27,6 +27,12 @@ provides_tools:
   - farcaster
   - airdrop
   - watch_activity
+  - clawnch_launch
+  - clawnch_fees
+  - bankr_launch
+  - bankr_automate
+  - bankr_polymarket
+  - bankr_leverage
   - analytics
   - market_intel
   - cost_basis

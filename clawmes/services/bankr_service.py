@@ -151,6 +151,30 @@ class BankrService(Service):
             raise BankrError("bad_response", "Bankr sign returned no signature")
         return sig
 
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generic call into the Bankr API for the bankr_* tools
+        (launch, automate, polymarket, leverage).
+
+        Each Bankr-tier tool maps its actions to a specific endpoint
+        and passes the user-supplied payload through. This lets the
+        tools stay thin wrappers without hardcoding endpoint paths
+        in three different places.
+        """
+        method = method.upper()
+        if method == "GET":
+            return self._get(path)
+        if method == "POST":
+            if body is None:
+                body = {}
+            return self._post(path, body)
+        raise BankrError("api_error", f"unsupported method: {method}")
+
     # --- internals ---
 
     def _headers(self) -> dict[str, str]:
