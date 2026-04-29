@@ -53,6 +53,8 @@ provides_tools:
   - permit2
   - compound_action
   - manage_orders
+  - liquidity
+  - browser
   - _user_tools
 
 provides_hooks:

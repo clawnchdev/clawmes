@@ -39,6 +39,7 @@ def register_all(ctx) -> None:
         bankr_polymarket,
         block_explorer,
         bridge,
+        browser,
         clawnch_fees,
         clawnch_launch,
         clawnchconnect,
@@ -55,6 +56,7 @@ def register_all(ctx) -> None:
         governance,
         herd_intelligence,
         hummingbot,
+        liquidity,
         lobster_cash,
         manage_orders,
         market_intel,
@@ -119,6 +121,8 @@ def register_all(ctx) -> None:
         permit2,
         compound_action,
         manage_orders,
+        liquidity,
+        browser,
         _user_tools,
     ):
         mod.register(ctx)
