@@ -15,6 +15,7 @@ provides_tools:
   - transfer
   - defi_swap
   - defi_lend
+  - defi_stake
   - approvals
   - defi_price
   - defi_balance

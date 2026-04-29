@@ -34,6 +34,7 @@ def register_all(ctx) -> None:
         defi_balance,
         defi_lend,
         defi_price,
+        defi_stake,
         defi_swap,
         transfer,
     )
@@ -46,6 +47,7 @@ def register_all(ctx) -> None:
         transfer,
         defi_swap,
         defi_lend,
+        defi_stake,
         approvals,
         defi_price,
         defi_balance,
