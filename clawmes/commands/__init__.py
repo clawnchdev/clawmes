@@ -14,13 +14,14 @@ rejected.
 from __future__ import annotations
 
 from clawmes.commands import (
-    help as help_cmd,
-)
-from clawmes.commands import (
+    doctor,
     plans,
     policy,
     tx,
     wallet,
+)
+from clawmes.commands import (
+    help as help_cmd,
 )
 
 __all__ = ["register_all"]
@@ -33,6 +34,7 @@ def register_all(ctx) -> None:
     policy.register(ctx)
     tx.register(ctx)
     plans.register(ctx)
+    doctor.register(ctx)
     # TODO(v0.1.0+): onboarding, model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills, channel
