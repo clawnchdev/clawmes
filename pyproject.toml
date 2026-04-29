@@ -1,7 +1,7 @@
 [project]
 name = "clawmes"
 version = "0.1.0"
-description = "Hermes Agent for crypto. The biggest open-source AI assistant, now it handles real money."
+description = "Hermes Agent plugin for crypto: wallets, DEX trading, lending and staking, governance, on-chain automation."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Clawnch", email = "dev@clawn.ch" }]

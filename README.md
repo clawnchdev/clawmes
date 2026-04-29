@@ -1,6 +1,14 @@
 # clawmes
 
+[![CI](https://github.com/clawnchdev/clawmes/actions/workflows/ci.yml/badge.svg)](https://github.com/clawnchdev/clawmes/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/clawnchdev/clawmes/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://github.com/clawnchdev/clawmes/blob/main/pyproject.toml)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 > Hermes Agent for crypto.
+
+> [!WARNING]
+> **Pre-alpha. Do not use real funds.** No real-network validation has happened yet, and no third-party security audit has been done. The signing paths are tested with mocks but unverified against live mainnet conditions. Use small testnet amounts only until v1.0. See [SECURITY.md](SECURITY.md) for the full threat model and recovery checklist.
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
@@ -8,24 +16,20 @@ Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin
 
 ## Quick start
 
+clawmes is not yet on PyPI; install from GitHub:
+
 ```bash
-pip install hermes-agent           # if you don't already have Hermes
-pip install clawmes                # PyPI
+# 1. Install Hermes Agent (see https://github.com/NousResearch/hermes-agent)
+# 2. Install clawmes as a Hermes plugin:
+hermes plugins install clawnchdev/clawmes --enable
 hermes clawmes init                # interactive setup wizard
 hermes                             # start chatting
 ```
 
-The `hermes clawmes init` wizard validates LLM keys live, writes secrets to `~/.hermes/.env`, writes config to `~/.hermes/config.yaml`, enables the plugin, copies SOUL.md if absent, and seeds the bundled skills.
+The `hermes clawmes init` wizard prompts for wallet mode (WalletConnect / local / Bankr), per-mode setup (project ID / password+mnemonic / API key), and optional API keys for the most-used integrations. It writes everything to `~/.hermes/.env` in upsert mode (existing keys preserved).
 
-### Other install methods
+### Editable / dev install
 
-**GitHub (no PyPI):**
-```bash
-hermes plugins install clawnchdev/clawmes --enable
-hermes clawmes init
-```
-
-**Editable / dev:**
 ```bash
 git clone https://github.com/clawnchdev/clawmes
 cd clawmes
@@ -33,6 +37,10 @@ pip install -e ".[dev]"
 hermes plugins enable clawmes
 hermes clawmes init
 ```
+
+### PyPI publishing
+
+The package is not yet published. v0.1.0 is GitHub-only. PyPI publication will land once the bridges-integration job has run a real-network smoke test and a third-party audit signs off the signing paths. Track [#1](https://github.com/clawnchdev/clawmes/issues) for the publish milestone.
 
 ## Tools
 

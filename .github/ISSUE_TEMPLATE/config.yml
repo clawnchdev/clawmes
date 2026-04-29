@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: mailto:security@clawn.ch
+    about: Report security issues to security@clawn.ch — do NOT file public issues
+  - name: Hermes Agent issues
+    url: https://github.com/NousResearch/hermes-agent/issues
+    about: For Hermes Agent itself (not clawmes), file upstream

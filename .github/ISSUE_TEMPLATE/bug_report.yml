@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a problem with clawmes
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. clawmes is pre-alpha — bug reports are valuable signal.
+
+        **Security issues**: do NOT file these here. Email security@clawn.ch instead.
+        See [SECURITY.md](https://github.com/clawnchdev/clawmes/blob/main/SECURITY.md).
+
+  - type: input
+    id: clawmes-version
+    attributes:
+      label: clawmes version
+      description: Output of `hermes clawmes version`
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: hermes-version
+    attributes:
+      label: Hermes Agent version
+      description: Output of `hermes --version`
+      placeholder: "2026.4.x"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: wallet-mode
+    attributes:
+      label: Wallet mode
+      options:
+        - WalletConnect
+        - Local key
+        - Bankr
+        - N/A (read-only operation)
+        - Not connected
+
+  - type: input
+    id: chain-id
+    attributes:
+      label: Chain ID
+      description: Which chain were you on? (1 = Ethereum, 8453 = Base, etc.)
+      placeholder: "8453"
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: |
+        Describe what you did, what you expected, and what you got. If a tool returned
+        an error, include the JSON error_code field.
+      placeholder: |
+        I ran /swap 100 USDC to ETH on Base. Expected a quote; got an error.
+        error_code: rate_limited
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: Paste the output of `hermes clawmes doctor` (redact API keys)
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: |
+        From `${HERMES_HOME}/clawmes/logs/clawmes.log` — the last 20-40 lines around
+        the error are usually enough. The credential redactor strips secrets, but
+        do a final visual pass before pasting.
+      render: shell
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmations
+      options:
+        - label: I read SECURITY.md and confirmed this is not a security issue
+          required: true
+        - label: I redacted any secrets from the logs/doctor output above
+          required: true

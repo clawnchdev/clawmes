@@ -25,12 +25,12 @@ Methods on `hermes_cli.plugins.PluginContext` that clawmes consumes:
 | API | Where used | Stability |
 |---|---|---|
 | `ctx.register_tool(name, toolset, schema, handler, requires_env, emoji)` | `clawmes/tools/registry.py:register_with_ctx` | Stable |
-| `ctx.register_command(name, handler, description, args_hint)` | `clawmes/commands/__init__.py:register_all` (forthcoming) | Stable |
-| `ctx.register_hook(name, callback)` | `clawmes/hooks/__init__.py:register_all` (forthcoming) | Stable |
-| `ctx.register_cli_command(name, help, setup_fn, handler_fn, description)` | `clawmes/cli/__init__.py:register_all` (forthcoming) | Stable |
-| `ctx.register_skill(name, path, description)` | `clawmes/skills/__init__.py:register_all` (forthcoming) | Stable |
-| `ctx.dispatch_tool(tool_name, args, **kwargs)` | `clawmes/plans/executor.py` (forthcoming) | Stable |
-| `ctx.inject_message(content, role)` | `clawmes/services/chat_dispatch.py` (forthcoming) | Stable |
+| `ctx.register_command(name, handler, description, args_hint)` | `clawmes/commands/__init__.py:register_all` | Stable |
+| `ctx.register_hook(name, callback)` | `clawmes/hooks/__init__.py:register_all` | Stable |
+| `ctx.register_cli_command(name, help, setup_fn, handler_fn, description)` | `clawmes/cli/__init__.py:register_all` | Stable |
+| `ctx.register_skill(name, path, description)` | `clawmes/skills/__init__.py:register_all` | Stable |
+| `ctx.dispatch_tool(tool_name, args, **kwargs)` | `clawmes/plans/executor.py` | Stable |
+| `ctx.inject_message(content, role)` | _planned for v0.2 — chat-dispatch service not yet wired_ | Stable |
 
 ## Hooks consumed
 
