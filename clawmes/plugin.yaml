@@ -14,6 +14,7 @@ provides_tools:
   - clawnchconnect
   - transfer
   - defi_swap
+  - defi_lend
   - approvals
   - defi_price
   - defi_balance
