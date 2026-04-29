@@ -42,6 +42,7 @@ def start_all() -> None:
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.credential_redactor import get_credential_redactor
     from clawmes.services.explorer import get_explorer_service
+    from clawmes.services.lifi import get_lifi_service
     from clawmes.services.mode_service import get_mode_service
     from clawmes.services.persona_service import get_persona_service
     from clawmes.services.price import get_price_service
@@ -81,6 +82,8 @@ def start_all() -> None:
         # 6b. 0x DEX aggregator HTTP client. Read-only by definition;
         #     swaps are signed locally by the wallet mode.
         get_zerox_service,
+        # 6c. LiFi cross-chain bridge aggregator. Same shape as 0x.
+        get_lifi_service,
         # 7. Background daemons — last so they pick up everything above.
         get_scheduler,  # ticking=True; needs cron driver to actually fire
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs

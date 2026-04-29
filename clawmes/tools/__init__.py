@@ -30,6 +30,7 @@ def register_all(ctx) -> None:
     from clawmes.tools import (
         approvals,
         block_explorer,
+        bridge,
         clawnchconnect,
         defi_balance,
         defi_lend,
@@ -48,6 +49,7 @@ def register_all(ctx) -> None:
         defi_swap,
         defi_lend,
         defi_stake,
+        bridge,
         approvals,
         defi_price,
         defi_balance,
