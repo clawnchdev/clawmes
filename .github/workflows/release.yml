@@ -122,15 +122,19 @@ jobs:
       - name: Upload artifacts to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           # If the release exists (created manually before tagging),
           # just upload the dist files. Otherwise create it.
+          # --repo is explicit because this job has no checkout, so
+          # gh can't auto-detect the repo from a .git directory.
           TAG="${GITHUB_REF#refs/tags/}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.whl dist/*.tar.gz --clobber
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.whl dist/*.tar.gz --clobber --repo "$REPO"
           else
             gh release create "$TAG" \
               --title "$TAG" \
               --notes "See CHANGELOG.md for details. Wheel + sdist attached." \
+              --repo "$REPO" \
               dist/*.whl dist/*.tar.gz
           fi
