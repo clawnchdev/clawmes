@@ -24,6 +24,16 @@ SELECTOR_DECIMALS = "0x313ce567"
 SELECTOR_SYMBOL = "0x95d89b41"
 SELECTOR_NAME = "0x06fdde03"
 SELECTOR_TRANSFER = "0xa9059cbb"  # transfer(address,uint256)
+SELECTOR_APPROVE = "0x095ea7b3"  # approve(address,uint256)
+SELECTOR_ALLOWANCE = "0xdd62ed3e"  # allowance(address,address)
+
+# keccak256("Approval(address,address,uint256)") — emitted on every
+# successful approve(). Used for log filtering.
+APPROVAL_EVENT_TOPIC = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+
+# 2^256 - 1 — what wallets emit when "approve max" is selected. The
+# approvals tool flags any allowance >= this threshold as "unlimited".
+UNLIMITED_ALLOWANCE = (1 << 256) - 1
 
 
 def encode_address(address: str) -> str:
@@ -83,6 +93,26 @@ def encode_transfer(to: str, amount: int) -> str:
     two 32-byte slots.
     """
     return SELECTOR_TRANSFER + encode_address(to) + encode_uint(amount)
+
+
+def encode_approve(spender: str, amount: int) -> str:
+    """Build calldata for ``approve(<spender>, <amount>)``.
+
+    Pass ``amount=0`` to revoke an allowance. Pass
+    ``amount=UNLIMITED_ALLOWANCE`` to grant unlimited (most wallets'
+    default — convenient but a security footgun if the spender is
+    later compromised).
+    """
+    return SELECTOR_APPROVE + encode_address(spender) + encode_uint(amount)
+
+
+def encode_allowance(owner: str, spender: str) -> str:
+    """Build calldata for ``allowance(<owner>, <spender>)``.
+
+    Used as an ``eth_call`` to read a current allowance without paying
+    gas. Returns hex; decode via :func:`decode_uint`.
+    """
+    return SELECTOR_ALLOWANCE + encode_address(owner) + encode_address(spender)
 
 
 def decode_uint(hex_data: str) -> int:

@@ -13,6 +13,7 @@ kind: standalone
 provides_tools:
   - clawnchconnect
   - transfer
+  - approvals
   - defi_price
   - defi_balance
   - block_explorer

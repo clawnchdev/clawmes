@@ -28,6 +28,7 @@ def register_all(ctx) -> None:
     across v0.1.0 → v0.5.0; this list grows as each tool module lands.
     """
     from clawmes.tools import (
+        approvals,
         block_explorer,
         clawnchconnect,
         defi_balance,
@@ -38,5 +39,12 @@ def register_all(ctx) -> None:
     # clawnchconnect first — the LLM should reach for it whenever a
     # write tool errors with wallet_not_connected, so it benefits from
     # being early in the tool catalog.
-    for mod in (clawnchconnect, transfer, defi_price, defi_balance, block_explorer):
+    for mod in (
+        clawnchconnect,
+        transfer,
+        approvals,
+        defi_price,
+        defi_balance,
+        block_explorer,
+    ):
         mod.register(ctx)

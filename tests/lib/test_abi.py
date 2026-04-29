@@ -5,14 +5,20 @@ from __future__ import annotations
 import pytest
 
 from clawmes.lib.abi import (
+    APPROVAL_EVENT_TOPIC,
+    SELECTOR_ALLOWANCE,
+    SELECTOR_APPROVE,
     SELECTOR_BALANCE_OF,
     SELECTOR_DECIMALS,
     SELECTOR_NAME,
     SELECTOR_SYMBOL,
     SELECTOR_TRANSFER,
+    UNLIMITED_ALLOWANCE,
     decode_uint,
     decode_uint8,
     encode_address,
+    encode_allowance,
+    encode_approve,
     encode_balance_of,
     encode_decimals_call,
     encode_transfer,
@@ -161,3 +167,47 @@ class TestEncodeTransfer:
     def test_negative_amount_propagates(self):
         with pytest.raises(ValueError):
             encode_transfer("0x" + "a" * 40, -1)
+
+
+class TestApprovalConstants:
+    def test_selectors_pinned(self):
+        assert SELECTOR_APPROVE == "0x095ea7b3"
+        assert SELECTOR_ALLOWANCE == "0xdd62ed3e"
+
+    def test_approval_event_topic_pinned(self):
+        # keccak256("Approval(address,address,uint256)") — well-known
+        assert APPROVAL_EVENT_TOPIC == (
+            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+        )
+
+    def test_unlimited_constant(self):
+        assert UNLIMITED_ALLOWANCE == (1 << 256) - 1
+
+
+class TestEncodeApprove:
+    def test_basic(self):
+        out = encode_approve("0x" + "a" * 40, 1000)
+        assert out.startswith(SELECTOR_APPROVE)
+        assert int(out[-64:], 16) == 1000
+        assert "a" * 40 in out
+
+    def test_unlimited(self):
+        out = encode_approve("0x" + "a" * 40, UNLIMITED_ALLOWANCE)
+        assert int(out[-64:], 16) == UNLIMITED_ALLOWANCE
+        assert out.endswith("f" * 64)
+
+    def test_zero_for_revoke(self):
+        out = encode_approve("0x" + "a" * 40, 0)
+        assert out.endswith("0" * 64)
+
+
+class TestEncodeAllowance:
+    def test_basic(self):
+        owner = "0x" + "a" * 40
+        spender = "0x" + "b" * 40
+        out = encode_allowance(owner, spender)
+        assert out.startswith(SELECTOR_ALLOWANCE)
+        # selector + 2 address slots = 8 + 128 hex chars + "0x"
+        assert len(out) == 2 + 8 + 64 + 64
+        assert "a" * 40 in out
+        assert "b" * 40 in out

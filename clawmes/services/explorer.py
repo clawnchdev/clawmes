@@ -134,6 +134,57 @@ class ExplorerService(Service):
             return int(result, 16)
         return int(result) if isinstance(result, int) else 0
 
+    def get_logs(
+        self,
+        chain_id: int,
+        *,
+        address: str | None = None,
+        topic0: str | None = None,
+        topic1: str | None = None,
+        topic2: str | None = None,
+        topic3: str | None = None,
+        from_block: int | str = 0,
+        to_block: int | str = "latest",
+        page: int = 1,
+        offset: int = 1000,
+    ) -> list[dict]:
+        """Fetch event logs matching the given filter.
+
+        Mirrors the Etherscan ``module=logs&action=getLogs`` endpoint.
+        ``topic0`` is the event signature hash; ``topic1``-``topic3``
+        are indexed parameters. All topic args must be 32-byte hex
+        (use ``"0x" + value.zfill(64)`` for left-padding addresses).
+
+        Returns a list of log dicts. Empty list when no matches; raises
+        :class:`ExplorerError` on API failure.
+        """
+        params: dict = {
+            "module": "logs",
+            "action": "getLogs",
+            "fromBlock": str(from_block),
+            "toBlock": str(to_block),
+            "page": str(page),
+            "offset": str(offset),
+        }
+        if address is not None:
+            params["address"] = address
+        if topic0 is not None:
+            params["topic0"] = topic0
+        if topic1 is not None:
+            params["topic1"] = topic1
+            params["topic0_1_opr"] = "and"
+        if topic2 is not None:
+            params["topic2"] = topic2
+            params["topic1_2_opr"] = "and"
+        if topic3 is not None:
+            params["topic3"] = topic3
+            params["topic2_3_opr"] = "and"
+
+        result = self._call(chain_id, **params)
+        if not isinstance(result, list):
+            return []
+        return result
+
     # --- internals ---
 
     def _call(self, chain_id: int, **params) -> object:

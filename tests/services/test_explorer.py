@@ -149,6 +149,71 @@ class TestErrorPaths:
         assert result == 0
 
 
+class TestGetLogs:
+    def test_basic_filter(self, svc, fake_http):
+        fake_http.responses.append(
+            {"status": "1", "result": [{"address": "0xtoken", "topics": []}]}
+        )
+        result = svc.get_logs(
+            8453,
+            address="0xtoken",
+            topic0="0xsig",
+            topic1="0xowner",
+            from_block=100,
+            to_block=200,
+        )
+        assert isinstance(result, list)
+        assert len(result) == 1
+        params = fake_http.calls[0]["params"]
+        assert params["module"] == "logs"
+        assert params["action"] == "getLogs"
+        assert params["address"] == "0xtoken"
+        assert params["topic0"] == "0xsig"
+        assert params["topic1"] == "0xowner"
+        assert params["topic0_1_opr"] == "and"
+        assert params["fromBlock"] == "100"
+        assert params["toBlock"] == "200"
+
+    def test_all_topics(self, svc, fake_http):
+        fake_http.responses.append({"status": "1", "result": []})
+        svc.get_logs(
+            8453,
+            topic0="0xa",
+            topic1="0xb",
+            topic2="0xc",
+            topic3="0xd",
+        )
+        params = fake_http.calls[0]["params"]
+        assert params["topic0"] == "0xa"
+        assert params["topic1"] == "0xb"
+        assert params["topic2"] == "0xc"
+        assert params["topic3"] == "0xd"
+        # Operator chaining for combined filter
+        assert params["topic0_1_opr"] == "and"
+        assert params["topic1_2_opr"] == "and"
+        assert params["topic2_3_opr"] == "and"
+
+    def test_no_results_returns_empty(self, svc, fake_http):
+        # Etherscan returns "No records found" with status="0" and result=[]
+        fake_http.responses.append({"status": "0", "message": "No records found", "result": []})
+        with pytest.raises(ExplorerError):
+            # status="0" classifies as error per current _call semantics
+            svc.get_logs(8453, address="0xtoken")
+
+    def test_non_list_result_returns_empty(self, svc, fake_http):
+        # Defensive: explorer returns a non-list payload
+        fake_http.responses.append({"status": "1", "result": "unexpected"})
+        result = svc.get_logs(8453)
+        assert result == []
+
+    def test_default_block_range(self, svc, fake_http):
+        fake_http.responses.append({"status": "1", "result": []})
+        svc.get_logs(8453)
+        params = fake_http.calls[0]["params"]
+        assert params["fromBlock"] == "0"
+        assert params["toBlock"] == "latest"
+
+
 class TestSingleton:
     def test_returns_same_instance(self):
         a = get_explorer_service()
