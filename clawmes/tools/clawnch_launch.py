@@ -31,10 +31,10 @@ from clawmes.tools.registry import register_with_ctx, write_tool
 
 _log = logger_for("tools.clawnch_launch")
 
-# Default Clawnch launchpad contract on Base. Override via env for
-# testnet / forks.
-_DEFAULT_LAUNCHPAD = "0x" + "C1" * 20  # placeholder until Clawnch publishes
-
+# Clawnch launchpad address must be supplied via env. The launchpad
+# contract isn't yet published; until then this tool requires
+# CLAWNCH_LAUNCHPAD_ADDRESS to be set explicitly. Fail-loud is better
+# than dispatching to a non-existent contract.
 _LAUNCH_GAS_DEFAULT = 1_500_000  # ERC-20 deploy + V4 pool init
 
 _SCHEMA: dict[str, Any] = {
@@ -107,7 +107,15 @@ def clawnch_launch(args: dict[str, Any], **kwargs: Any) -> str:
 def _send(state, calldata: str) -> str:
     from clawmes.services.wallet import get_wallet_service
 
-    launchpad = os.environ.get("CLAWNCH_LAUNCHPAD_ADDRESS") or _DEFAULT_LAUNCHPAD
+    launchpad = os.environ.get("CLAWNCH_LAUNCHPAD_ADDRESS")
+    if not launchpad:
+        return error_result(
+            "CLAWNCH_LAUNCHPAD_ADDRESS is not set. The Clawnch "
+            "launchpad address must be configured before this tool "
+            "can submit transactions. See the project README for "
+            "configuration.",
+            code="not_configured",
+        )
     svc = get_wallet_service()
     mode = svc.active_mode
     if mode is None:

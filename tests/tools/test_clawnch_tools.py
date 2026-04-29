@@ -20,6 +20,10 @@ def _isolate(monkeypatch, tmp_path):
     from clawmes.services import wallet as wallet_mod
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    # Required for clawnch_launch / clawnch_fees write actions —
+    # without this the tools fail-loud on missing config rather than
+    # dispatching to a placeholder contract.
+    monkeypatch.setenv("CLAWNCH_LAUNCHPAD_ADDRESS", "0x" + "C" * 40)
     monkeypatch.setattr(wallet_mod, "_instance", None)
     policy_storage.save_policies([])
 
@@ -107,10 +111,19 @@ class TestClawnchLaunchActions:
         assert out["details"]["error_code"] == "send_failed"
 
     def test_env_override(self, monkeypatch, connected, fake_mode):
+        # Override the default-set CLAWNCH_LAUNCHPAD_ADDRESS to confirm
+        # a custom value flows through to the wallet mode call.
         monkeypatch.setenv("CLAWNCH_LAUNCHPAD_ADDRESS", "0x" + "9" * 40)
         clawnch_launch({"action": "deploy", "calldata": "0xabc"})
         kwargs = fake_mode.send_transaction.call_args.kwargs
         assert kwargs["to"] == "0x" + "9" * 40
+
+    def test_no_env_set(self, monkeypatch, connected, fake_mode):
+        # Without CLAWNCH_LAUNCHPAD_ADDRESS, write actions fail-loud
+        monkeypatch.delenv("CLAWNCH_LAUNCHPAD_ADDRESS", raising=False)
+        out = json.loads(clawnch_launch({"action": "deploy", "calldata": "0xabc"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "not_configured"
 
 
 class TestClawnchFees:
@@ -154,6 +167,12 @@ class TestClawnchFees:
         fake_mode.send_transaction.side_effect = RuntimeError("rejected")
         out = json.loads(clawnch_fees({"action": "claim", "calldata": "0xabc"}))
         assert out["isError"] is True
+
+    def test_claim_no_env_set(self, monkeypatch, connected, fake_mode):
+        monkeypatch.delenv("CLAWNCH_LAUNCHPAD_ADDRESS", raising=False)
+        out = json.loads(clawnch_fees({"action": "claim", "calldata": "0xabc"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "not_configured"
 
 
 class TestRegister:

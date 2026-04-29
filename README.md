@@ -2,9 +2,9 @@
 
 > Hermes Agent for crypto. The hottest open-source AI assistant can now handle real money.
 
-Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that turns Hermes into an infinitely extensible crypto-native assistant. It's a full Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes instead of OpenClaw.
+Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that turns Hermes into an infinitely extensible crypto-native assistant. It's a Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes instead of OpenClaw.
 
-48 tools. 118 commands. 76 services. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+45 tools. 27 commands. 14 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -38,19 +38,17 @@ hermes clawmes init
 
 | Category | Tools | What it does |
 |---|---|---|
-| **Wallet** | `clawnchconnect`, `transfer`, `permit2`, `approvals` | WalletConnect pairing, ENS transfers, token approvals, spending policies |
-| **Trading** | `defi_swap`, `defi_balance`, `liquidity`, `manage_orders`, `bridge` | 6 DEX aggregators, limit/stop/trailing orders, DCA, cross-chain bridging |
-| **DeFi** | `defi_lend`, `defi_stake`, `yield` | Aave V3 supply/borrow, Lido/Rocket Pool staking, Yearn V3 vaults |
-| **Market data** | `defi_price`, `analytics`, `market_intel`, `cost_basis` | RSI/MACD/Bollinger bands, trending tokens, whale activity, FIFO P&L tracking |
-| **Token launches** | `clawnch_launch`, `clawnch_fees` | Deploy ERC-20s on Base via Clawnch launchpad with Uniswap V4 pools |
-| **Bankr** | `bankr_launch`, `bankr_automate`, `bankr_polymarket`, `bankr_leverage` | Custodial wallet, automation rules, Polymarket predictions, leveraged positions |
-| **NFT & Airdrop** | `nft`, `airdrop` | ERC-721 mint/transfer/burn, airdrop eligibility checking, claim generation |
-| **Security** | `privacy`, `safe` | Privacy-preserving transfers, Gnosis Safe multisig management |
-| **Governance** | `governance`, `farcaster` | DAO proposal voting, Farcaster casting/search/notifications |
-| **On-chain Intel** | `block_explorer`, `herd_intelligence`, `watch_activity`, `browser` | Contract source, token audits, swap monitoring, web browsing |
-| **Automation** | `compound_action` | Multi-step plans with conditionals, time/price/on-chain triggers |
-| **Agent** | `molten`, `clawnx`, `hummingbot`, `wayfinder` | X/Twitter posting, agent-to-agent matching, market-making, route optimization |
-| **Memory** | `agent_memory`, `skill_evolve`, `session_recall` | Persistent memory, self-improvement, session context recall |
+| **Wallet** (4) | `clawnchconnect`, `transfer`, `permit2`, `approvals` | WalletConnect pairing, ENS transfers, Permit2 signed approvals, ERC-20 allowance management |
+| **Trading** (8) | `defi_swap`, `defi_balance`, `defi_lend`, `defi_stake`, `defi_price`, `liquidity`, `manage_orders`, `bridge` | 0x DEX aggregator, Aave V3 lending, Lido/Rocket Pool staking, Uniswap V3 LP positions, limit/stop/trailing/DCA orders, LiFi cross-chain bridging |
+| **Yield/Analytics** (4) | `yield`, `analytics`, `market_intel`, `cost_basis` | DeFiLlama yields, RSI/MACD/Bollinger TA, trending tokens via CoinGecko, FIFO P&L from local ledger |
+| **Launches** (6) | `clawnch_launch`, `clawnch_fees`, `bankr_launch`, `bankr_automate`, `bankr_polymarket`, `bankr_leverage` | Token deploys on Base via Clawnch launchpad, Bankr-side automation rules, Polymarket predictions, Avantis perp leverage |
+| **Ownership** (4) | `nft`, `airdrop`, `privacy`, `safe` | Reservoir NFT API, OZ Merkle distributor airdrop claims, Lobster privacy pools, Gnosis Safe multisig |
+| **Governance** (2) | `governance`, `farcaster` | Snapshot + Tally proposals/voting, Neynar Farcaster cast/search/feed |
+| **On-chain Intel** (4) | `block_explorer`, `herd_intelligence`, `watch_activity`, `browser` | Etherscan family, Herd whale tracking, persistent watch list, headless Playwright browsing |
+| **Automation** (1) | `compound_action` | Multi-step plans (DCA, conditional triggers, loops) via plan scheduler |
+| **Agent ops** (4) | `molten`, `clawnx`, `hummingbot`, `wayfinder` | X/Twitter posting, agent-to-agent matching, local Hummingbot market-making gateway, multi-step route optimization |
+| **Memory** (3) | `agent_memory`, `skill_evolve`, `session_recall` | Hermes-backed persistent memory, agentic skill self-improvement, past-session search |
+| **Misc** (5) | `giza`, `nookplot`, `paysponge`, `lobster_cash`, `_user_tools` | zkML inference, Farcaster analytics, fiat ramp, privacy pools, custom-tool dispatcher |
 
 ## Channels
 
@@ -124,15 +122,15 @@ hermes clawmes uninstall         Remove from plugins.enabled (state preserved)
 hermes (the upstream CLI, hermes-agent ≥ 2026.4.x)
   └── PluginManager.discover_and_load()
         └── clawmes.register(ctx)
-              ├── 48 tools     (registered via ctx.register_tool, write-gated)
-              ├── 118 commands (registered via ctx.register_command)
-              ├── ~7 hooks     (pre_tool_call, post_tool_call, pre_llm_call, ...)
-              ├── 41 skills    (registered via ctx.register_skill, namespaced clawmes:*)
+              ├── 45 tools     (registered via ctx.register_tool, write-gated)
+              ├── 27 commands  (registered via ctx.register_command)
+              ├── 11 hooks     (pre_tool_call, post_tool_call, pre_llm_call, ...)
+              ├── 6 skills     (registered via ctx.register_skill, namespaced clawmes:*)
               ├── CLI subcmds  (registered via ctx.register_cli_command)
-              └── 76 services  (start_all() starts background lifecycle)
+              └── 14 services  (start_all() starts background lifecycle)
                     │
                     ├── subprocess: clawmes-wc-bridge   (Node — WalletConnect v2)
-                    └── subprocess: clawmes-sa-bridge   (Node — MetaMask Smart Accounts)
+                    └── subprocess: clawmes-sa-bridge   (Node — MetaMask Smart Accounts; planned)
 ```
 
 Two bundled Node sub-process bridges (`clawmes-wc-bridge`, `clawmes-sa-bridge`) handle WalletConnect v2 sign-client and MetaMask Smart Accounts SDK respectively, communicated to via JSON-line RPC over stdio. They install on first plugin load via `npm ci` against pinned `package-lock.json` files in the wheel.
@@ -159,22 +157,51 @@ CLAWMES_LOCAL_KEY_PASSWORD=
 BANKR_API_KEY=
 ```
 
-Optional (tools degrade gracefully without):
+Optional (per-tool — features degrade gracefully without their key):
 
 ```bash
+# RPC + explorers
 ALCHEMY_API_KEY=
-ZEROX_API_KEY=
-ONEINCH_API_KEY=
-LIFI_API_KEY=
 BASESCAN_API_KEY=
 ETHERSCAN_API_KEY=
+ARBISCAN_API_KEY=
+OPTIMISM_ETHERSCAN_API_KEY=
+POLYGONSCAN_API_KEY=
+CLAWMES_RPC_<chain_id>=  # override per-chain RPC URL
+
+# DEX / bridge aggregators
+ZEROX_API_KEY=
+LIFI_API_KEY=
+
+# Market data + analytics
 COINGECKO_API_KEY=
 HERD_ACCESS_TOKEN=
+
+# Social
 NEYNAR_API_KEY=
+NEYNAR_SIGNER_UUID=
+NOOKPLOT_API_KEY=
+
+# NFT
 RESERVOIR_API_KEY=
+
+# Governance
+TALLY_API_KEY=
+
+# Specialized
+GIZA_API_KEY=         # zkML inference
+PAYSPONGE_API_KEY=    # fiat on/off-ramp
+LOBSTER_API_KEY=      # privacy pools
+MOLTEN_API_KEY=       # X (Twitter) integration
+CLAWNX_API_KEY=       # agent-to-agent network
+HUMMINGBOT_API_KEY=   # market-making gateway (also: HUMMINGBOT_GATEWAY_URL)
+WAYFINDER_API_KEY=    # route optimization
+
+# Token launches (override default contract addresses)
+CLAWNCH_LAUNCHPAD_ADDRESS=
 ```
 
-The setup wizard (`hermes clawmes init`) walks through everything interactively with live key validation.
+The setup wizard (`hermes clawmes init`) walks through the most-used keys interactively with live validation.
 
 ## Development
 

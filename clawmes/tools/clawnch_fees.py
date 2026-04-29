@@ -24,7 +24,8 @@ from clawmes.tools.registry import register_with_ctx, write_tool
 
 _log = logger_for("tools.clawnch_fees")
 
-_DEFAULT_LAUNCHPAD = "0x" + "C1" * 20  # placeholder
+# Same as clawnch_launch — the launchpad address must be supplied via
+# env. Fail-loud rather than send a tx to a placeholder contract.
 _FEE_CLAIM_GAS_DEFAULT = 250_000
 
 _SCHEMA: dict[str, Any] = {
@@ -89,7 +90,14 @@ def clawnch_fees(args: dict[str, Any], **kwargs: Any) -> str:
 
     from clawmes.services.wallet import get_wallet_service
 
-    launchpad = os.environ.get("CLAWNCH_LAUNCHPAD_ADDRESS") or _DEFAULT_LAUNCHPAD
+    launchpad = os.environ.get("CLAWNCH_LAUNCHPAD_ADDRESS")
+    if not launchpad:
+        return error_result(
+            "CLAWNCH_LAUNCHPAD_ADDRESS is not set. The Clawnch "
+            "launchpad address must be configured before fees can be "
+            "claimed. See the project README for configuration.",
+            code="not_configured",
+        )
     svc = get_wallet_service()
     mode = svc.active_mode
     if mode is None:
