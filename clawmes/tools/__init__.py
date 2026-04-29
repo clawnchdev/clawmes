@@ -29,6 +29,7 @@ def register_all(ctx) -> None:
     """
     from clawmes.tools import (
         _user_tools,
+        agent_memory,
         airdrop,
         analytics,
         approvals,
@@ -51,6 +52,7 @@ def register_all(ctx) -> None:
         farcaster,
         giza,
         governance,
+        herd_intelligence,
         hummingbot,
         lobster_cash,
         market_intel,
@@ -58,7 +60,10 @@ def register_all(ctx) -> None:
         nft,
         nookplot,
         paysponge,
+        privacy,
         safe,
+        session_recall,
+        skill_evolve,
         transfer,
         watch_activity,
         wayfinder,
@@ -103,6 +108,11 @@ def register_all(ctx) -> None:
         wayfinder,
         giza,
         nookplot,
+        privacy,
+        herd_intelligence,
+        agent_memory,
+        skill_evolve,
+        session_recall,
         _user_tools,
     ):
         mod.register(ctx)

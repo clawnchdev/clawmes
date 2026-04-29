@@ -45,6 +45,11 @@ provides_tools:
   - wayfinder
   - giza
   - nookplot
+  - privacy
+  - herd_intelligence
+  - agent_memory
+  - skill_evolve
+  - session_recall
   - _user_tools
 
 provides_hooks:
