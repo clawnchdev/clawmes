@@ -23,6 +23,8 @@ provides_tools:
   - yield
   - nft
   - safe
+  - governance
+  - farcaster
   - analytics
   - market_intel
   - cost_basis
