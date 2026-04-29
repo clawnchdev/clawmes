@@ -33,11 +33,13 @@ def register_all(ctx) -> None:
         block_explorer,
         bridge,
         clawnchconnect,
+        cost_basis,
         defi_balance,
         defi_lend,
         defi_price,
         defi_stake,
         defi_swap,
+        market_intel,
         transfer,
     )
 
@@ -55,6 +57,8 @@ def register_all(ctx) -> None:
         defi_price,
         defi_balance,
         analytics,
+        market_intel,
+        cost_basis,
         block_explorer,
     ):
         mod.register(ctx)

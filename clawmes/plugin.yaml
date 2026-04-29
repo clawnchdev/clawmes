@@ -21,6 +21,8 @@ provides_tools:
   - defi_price
   - defi_balance
   - analytics
+  - market_intel
+  - cost_basis
   - block_explorer
 
 provides_hooks:
