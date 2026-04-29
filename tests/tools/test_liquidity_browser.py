@@ -49,17 +49,138 @@ def fake_mode(monkeypatch):
 
 
 class TestLiquidity:
-    def test_provide_requires_calldata(self, connected, fake_mode):
+    def test_provide_with_structured_args(self, connected, fake_mode):
         from clawmes.tools.liquidity import liquidity
 
-        out = json.loads(liquidity({"action": "provide"}))
-        assert out["isError"] is True
-        assert out["details"]["error_code"] == "not_implemented"
+        out = json.loads(
+            liquidity(
+                {
+                    "action": "provide",
+                    "token0": "0x" + "1" * 40,
+                    "token1": "0x" + "2" * 40,
+                    "fee": 3000,
+                    "tick_lower": -1000,
+                    "tick_upper": 1000,
+                    "amount0_desired": "1000000",
+                    "amount1_desired": "1000000",
+                }
+            )
+        )
+        assert "isError" not in out
+        kwargs = fake_mode.send_transaction.call_args.kwargs
+        # Mint selector
+        assert kwargs["data"].startswith("0x88316456")
 
-    def test_provide_with_calldata(self, connected, fake_mode):
+    def test_provide_with_calldata_override(self, connected, fake_mode):
         from clawmes.tools.liquidity import liquidity
 
         out = json.loads(liquidity({"action": "provide", "calldata": "0xdeadbeef"}))
+        assert "isError" not in out
+
+    def test_provide_missing_fee(self, connected, fake_mode):
+        from clawmes.tools.liquidity import liquidity
+
+        out = json.loads(
+            liquidity(
+                {
+                    "action": "provide",
+                    "token0": "0x" + "1" * 40,
+                    "token1": "0x" + "2" * 40,
+                    "tick_lower": -1000,
+                    "tick_upper": 1000,
+                    "amount0_desired": "1",
+                    "amount1_desired": "1",
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_provide_invalid_token(self, connected, fake_mode):
+        from clawmes.tools.liquidity import liquidity
+
+        out = json.loads(
+            liquidity(
+                {
+                    "action": "provide",
+                    "token0": "0xshort",
+                    "token1": "0x" + "2" * 40,
+                    "fee": 3000,
+                    "tick_lower": -1000,
+                    "tick_upper": 1000,
+                    "amount0_desired": "1",
+                    "amount1_desired": "1",
+                }
+            )
+        )
+        assert out["isError"] is True
+
+    def test_provide_bad_amount(self, connected, fake_mode):
+        from clawmes.tools.liquidity import liquidity
+
+        out = json.loads(
+            liquidity(
+                {
+                    "action": "provide",
+                    "token0": "0x" + "1" * 40,
+                    "token1": "0x" + "2" * 40,
+                    "fee": 3000,
+                    "tick_lower": -1000,
+                    "tick_upper": 1000,
+                    "amount0_desired": "garbage",
+                    "amount1_desired": "1",
+                }
+            )
+        )
+        assert out["isError"] is True
+
+    def test_provide_eth_abi_encoding_failure(self, connected, fake_mode, monkeypatch):
+        # Stub eth_abi.encode to raise — covers the defensive
+        # except-Exception branch around the encoder
+        import eth_abi
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("simulated encoder failure")
+
+        monkeypatch.setattr(eth_abi, "encode", boom)
+        from clawmes.tools.liquidity import liquidity
+
+        out = json.loads(
+            liquidity(
+                {
+                    "action": "provide",
+                    "token0": "0x" + "1" * 40,
+                    "token1": "0x" + "2" * 40,
+                    "fee": 3000,
+                    "tick_lower": -1000,
+                    "tick_upper": 1000,
+                    "amount0_desired": "1",
+                    "amount1_desired": "1",
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_provide_with_explicit_minimums(self, connected, fake_mode):
+        from clawmes.tools.liquidity import liquidity
+
+        out = json.loads(
+            liquidity(
+                {
+                    "action": "provide",
+                    "token0": "0x" + "1" * 40,
+                    "token1": "0x" + "2" * 40,
+                    "fee": 500,
+                    "tick_lower": -1000,
+                    "tick_upper": 1000,
+                    "amount0_desired": "1000",
+                    "amount1_desired": "1000",
+                    "amount0_min": "990",
+                    "amount1_min": "990",
+                }
+            )
+        )
         assert "isError" not in out
 
     def test_provide_no_wallet(self, monkeypatch, fake_mode):

@@ -48,17 +48,41 @@ tick range (lower/upper), and current liquidity. Read-only via
 
 ### `provide` — open a new position
 
-Currently requires explicit calldata (V3 mint() is complex —
-tick range, fee tier, slippage, deadline all need correct encoding).
-The recommended flow:
+The tool encodes V3 MintParams from structured args via eth_abi:
 
-1. User opens position via Uniswap UI (handles tick alignment +
-   slippage + tx complexity).
-2. Use this tool to MANAGE the resulting NFT-backed position.
+```json
+{
+  "action": "provide",
+  "token0": "0x...",
+  "token1": "0x...",
+  "fee": 3000,
+  "tick_lower": -1000,
+  "tick_upper": 1000,
+  "amount0_desired": "1000000",
+  "amount1_desired": "1000000",
+  "amount0_min": "990000",
+  "amount1_min": "990000"
+}
+```
+
+Required fields: `token0`, `token1`, `fee`, `tick_lower`, `tick_upper`,
+`amount0_desired`, `amount1_desired`. Optional: `amount0_min` /
+`amount1_min` (default 0 for slippage; production should set these).
+
+Fee tiers (in 1/10000ths): `100` (0.01%), `500` (0.05%), `3000`
+(0.3%), `10000` (1%). Tick alignment to the fee tier's tick spacing
+is the caller's responsibility — bad ticks revert at execution.
+
+Caller can still override with raw `calldata` if encoding outside
+the tool:
 
 ```json
 {"action": "provide", "calldata": "0x..."}
 ```
+
+For first-time mints where tick selection is unfamiliar, the
+Uniswap UI is recommended — then use this tool to manage the
+resulting NFT.
 
 ### `withdraw` — remove liquidity
 

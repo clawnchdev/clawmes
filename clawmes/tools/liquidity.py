@@ -38,6 +38,9 @@ V3_POSITION_MANAGER = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
 # positions(uint256) selector
 SELECTOR_POSITIONS = "0x99fbab88"
 
+# mint((address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256))
+SELECTOR_MINT = "0x88316456"
+
 # decreaseLiquidity((uint256,uint128,uint256,uint256,uint256))
 SELECTOR_DECREASE_LIQUIDITY = "0x0c49ccbe"
 
@@ -65,14 +68,45 @@ _SCHEMA: dict[str, Any] = {
         "token_id": {"type": "string", "description": "NFT id (write actions)."},
         "calldata": {
             "type": "string",
-            "description": "Override calldata for provide (complex mint).",
+            "description": "Optional calldata override for provide.",
         },
         "liquidity": {
             "type": "string",
             "description": "Liquidity to remove (withdraw).",
         },
-        "token0": {"type": "string", "description": "Pool token0 (pools query)."},
-        "token1": {"type": "string", "description": "Pool token1 (pools query)."},
+        "token0": {"type": "string", "description": "Pool token0."},
+        "token1": {"type": "string", "description": "Pool token1."},
+        "fee": {
+            "type": "integer",
+            "description": (
+                "Pool fee tier in 1/10000ths (provide). 100 = 0.01%, "
+                "500 = 0.05%, 3000 = 0.3%, 10000 = 1%."
+            ),
+        },
+        "tick_lower": {
+            "type": "integer",
+            "description": "Lower tick of the position (provide).",
+        },
+        "tick_upper": {
+            "type": "integer",
+            "description": "Upper tick of the position (provide).",
+        },
+        "amount0_desired": {
+            "type": "string",
+            "description": "Desired amount of token0 (provide).",
+        },
+        "amount1_desired": {
+            "type": "string",
+            "description": "Desired amount of token1 (provide).",
+        },
+        "amount0_min": {
+            "type": "string",
+            "description": "Minimum amount0 (slippage; provide).",
+        },
+        "amount1_min": {
+            "type": "string",
+            "description": "Minimum amount1 (slippage; provide).",
+        },
         "chain_id": {"type": "integer"},
         "policyConfirmationNonce": {"type": "string"},
     },
@@ -117,15 +151,95 @@ def liquidity(args: dict[str, Any], **kwargs: Any) -> str:
 
 
 def _handle_provide(args, state, chain_id: int) -> str:
-    calldata = read_str(args, "calldata")
-    if not calldata:
-        return error_result(
-            "provide requires explicit 'calldata' — Uniswap V3 mint() "
-            "is complex (tick range, fee tier, slippage). Use the "
-            "Uniswap UI to build the calldata or compute it externally.",
-            code="not_implemented",
+    """Build calldata for V3 NonfungiblePositionManager.mint().
+
+    Accepts either an explicit `calldata` override (for legacy /
+    advanced use) or the structured args (token0/token1/fee/ticks/
+    amounts) and encodes the MintParams tuple inline.
+    """
+    custom = read_str(args, "calldata")
+    if custom:
+        return _send(state, custom, chain_id, "provide")
+
+    encoded = _build_mint_calldata(args, state)
+    if isinstance(encoded, str) and encoded.startswith("__error__"):
+        return encoded[len("__error__") :]
+    return _send(state, encoded, chain_id, "provide")
+
+
+def _build_mint_calldata(args, state):
+    """Encode V3 MintParams via eth_abi.
+
+    Returns a 0x-prefixed hex string on success, or an error_result
+    sentinel string on validation failure.
+    """
+    try:
+        token0 = _validate_addr(read_str(args, "token0", required=True))
+        token1 = _validate_addr(read_str(args, "token1", required=True))
+        fee = read_int(args, "fee")
+        tick_lower = read_int(args, "tick_lower")
+        tick_upper = read_int(args, "tick_upper")
+        a0_desired = int(read_str(args, "amount0_desired", required=True))
+        a1_desired = int(read_str(args, "amount1_desired", required=True))
+        # Slippage minimums default to zero — caller should specify
+        # tighter values for production but zero is safe enough for the
+        # encoding to succeed.
+        a0_min_raw = read_str(args, "amount0_min")
+        a1_min_raw = read_str(args, "amount1_min")
+        a0_min = int(a0_min_raw) if a0_min_raw else 0
+        a1_min = int(a1_min_raw) if a1_min_raw else 0
+    except (ValueError, TypeError) as exc:
+        return "__error__" + error_result(f"Bad provide param: {exc}", code="param_error")
+
+    if fee is None or tick_lower is None or tick_upper is None:
+        return "__error__" + error_result(
+            "provide requires fee, tick_lower, tick_upper",
+            code="param_error",
         )
-    return _send(state, calldata, chain_id, "provide")
+
+    import time
+
+    deadline = int(time.time()) + 1800  # 30min
+
+    # Encode MintParams as a tuple. eth_abi expects the tuple type
+    # spelled out as "(...)"; all fields are static so the entire
+    # tuple is static (no dynamic offset prefix needed).
+    from eth_abi import encode
+
+    try:
+        encoded = encode(
+            [
+                "(address,address,uint24,int24,int24,uint256,uint256,"
+                "uint256,uint256,address,uint256)"
+            ],
+            [
+                (
+                    token0,
+                    token1,
+                    fee,
+                    tick_lower,
+                    tick_upper,
+                    a0_desired,
+                    a1_desired,
+                    a0_min,
+                    a1_min,
+                    state.address,
+                    deadline,
+                )
+            ],
+        )
+    except Exception as exc:  # noqa: BLE001
+        return "__error__" + error_result(
+            f"Could not encode mint params: {exc}",
+            code="param_error",
+        )
+    return SELECTOR_MINT + encoded.hex()
+
+
+def _validate_addr(value: str) -> str:
+    if not value or not value.startswith(("0x", "0X")) or len(value) != 42:
+        raise ValueError(f"invalid address: {value!r}")
+    return value
 
 
 def _handle_withdraw(args, state, chain_id: int) -> str:
