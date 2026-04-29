@@ -75,6 +75,12 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         "api.neynar.com",
         # NFTs
         "api.reservoir.tools",
+        "api-base.reservoir.tools",
+        "api-arbitrum.reservoir.tools",
+        "api-optimism.reservoir.tools",
+        "api-polygon.reservoir.tools",
+        # Yield aggregator
+        "yields.llama.fi",
         # Bankr
         "api.bankr.bot",
         "llm.bankr.bot",

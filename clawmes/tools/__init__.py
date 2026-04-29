@@ -40,7 +40,9 @@ def register_all(ctx) -> None:
         defi_stake,
         defi_swap,
         market_intel,
+        nft,
         transfer,
+        yield_farming,
     )
 
     # clawnchconnect first — the LLM should reach for it whenever a
@@ -56,6 +58,8 @@ def register_all(ctx) -> None:
         approvals,
         defi_price,
         defi_balance,
+        yield_farming,
+        nft,
         analytics,
         market_intel,
         cost_basis,

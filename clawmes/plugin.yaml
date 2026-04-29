@@ -20,6 +20,8 @@ provides_tools:
   - approvals
   - defi_price
   - defi_balance
+  - yield
+  - nft
   - analytics
   - market_intel
   - cost_basis
