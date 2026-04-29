@@ -16,17 +16,25 @@ Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin
 
 ## Quick start
 
-clawmes is not yet on PyPI; install from GitHub:
-
 ```bash
 # 1. Install Hermes Agent (see https://github.com/NousResearch/hermes-agent)
-# 2. Install clawmes as a Hermes plugin:
-hermes plugins install clawnchdev/clawmes --enable
+# 2. Install clawmes from PyPI:
+pip install clawmes
+hermes plugins enable clawmes
 hermes clawmes init                # interactive setup wizard
 hermes                             # start chatting
 ```
 
 The `hermes clawmes init` wizard prompts for wallet mode (WalletConnect / local / Bankr), per-mode setup (project ID / password+mnemonic / API key), and optional API keys for the most-used integrations. It writes everything to `~/.hermes/.env` in upsert mode (existing keys preserved).
+
+### Alternative: install direct from GitHub
+
+```bash
+hermes plugins install clawnchdev/clawmes --enable
+hermes clawmes init
+```
+
+This skips PyPI and pulls from the latest `main`. Use it if you want a specific commit or pre-release.
 
 ### Editable / dev install
 
@@ -38,9 +46,7 @@ hermes plugins enable clawmes
 hermes clawmes init
 ```
 
-### PyPI publishing
-
-The package is not yet published. v0.1.0 is GitHub-only. PyPI publication will land once the bridges-integration job has run a real-network smoke test and a third-party audit signs off the signing paths. Track [#1](https://github.com/clawnchdev/clawmes/issues) for the publish milestone.
+Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) on every `v*` tag push (no tokens, OIDC verified). See `.github/workflows/release.yml`.
 
 ## Tools
 
