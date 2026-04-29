@@ -25,6 +25,8 @@ provides_tools:
   - safe
   - governance
   - farcaster
+  - airdrop
+  - watch_activity
   - analytics
   - market_intel
   - cost_basis

@@ -28,6 +28,7 @@ def register_all(ctx) -> None:
     across v0.1.0 → v0.5.0; this list grows as each tool module lands.
     """
     from clawmes.tools import (
+        airdrop,
         analytics,
         approvals,
         block_explorer,
@@ -45,6 +46,7 @@ def register_all(ctx) -> None:
         nft,
         safe,
         transfer,
+        watch_activity,
         yield_farming,
     )
 
@@ -66,6 +68,8 @@ def register_all(ctx) -> None:
         safe,
         governance,
         farcaster,
+        airdrop,
+        watch_activity,
         analytics,
         market_intel,
         cost_basis,
