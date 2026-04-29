@@ -125,7 +125,7 @@ hermes (the upstream CLI, hermes-agent ≥ 2026.4.x)
               ├── 45 tools     (registered via ctx.register_tool, write-gated)
               ├── 27 commands  (registered via ctx.register_command)
               ├── 11 hooks     (pre_tool_call, post_tool_call, pre_llm_call, ...)
-              ├── 6 skills     (registered via ctx.register_skill, namespaced clawmes:*)
+              ├── 27 skills    (registered via ctx.register_skill, namespaced clawmes:*)
               ├── CLI subcmds  (registered via ctx.register_cli_command)
               └── 14 services  (start_all() starts background lifecycle)
                     │

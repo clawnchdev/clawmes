@@ -97,6 +97,39 @@ Service).
   persist as JSON under `${HERMES_HOME}/clawmes/plans/`. Trigger
   evaluation lands in v0.2.0.
 
+### Added — skill bundles
+
+- 27 skills total. The original 19 (transfer, defi-trading, lending,
+  staking, bridge, block-explorer, defi-swap, governance, nft,
+  safe-multisig, approvals, analytics, airdrop, permit2, automation,
+  liquidity, watch-activity, farcaster, bankr) plus 8 new ones for
+  the most-used remaining tools: manage-orders (limit/stop/trailing/
+  DCA), cost-basis (FIFO P&L + tax export), market-intel (trending /
+  whales / flows), browser (governance research, headless reads),
+  privacy (Lobster pool deposit-and-withdraw), agent-memory
+  (cross-session preferences), session-recall (past-session search),
+  and skill-evolve (self-improvement workflow).
+- Each skill is a directory with frontmatter-tagged SKILL.md.
+  Auto-registered via the walker in clawmes/skills/__init__.py.
+
+### Added — CLI subcommands
+
+- `hermes clawmes init` — interactive setup wizard. Three-step flow
+  (wallet mode \u2192 per-mode setup \u2192 optional API keys), upserts to
+  `~/.hermes/.env` preserving existing keys. `--check` for dry-run,
+  `--non-interactive` for CI (CLAWMES_INIT_* env vars), `--reconfigure`
+  to re-ask, `--skip-wallet` to bypass. Local-key mode includes real
+  keystore creation with mnemonic generate-or-import.
+
+### Fixed
+
+- 0x v2 (Permit2) response parsing: error envelope is {name,
+  message, data} not {name, reason}; gas/value are decimal strings
+  not hex; liquidityAvailable=false signals no-route. Adds
+  parse_0x_int helper that handles decimal, hex, int, or None
+  transparently. Request side was already on v2; only response
+  parsing needed fixing.
+
 ### Security
 
 - `SECURITY.md` — full threat model, recovery checklist, audit
