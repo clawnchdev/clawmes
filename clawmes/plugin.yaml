@@ -50,6 +50,9 @@ provides_tools:
   - agent_memory
   - skill_evolve
   - session_recall
+  - permit2
+  - compound_action
+  - manage_orders
   - _user_tools
 
 provides_hooks:
