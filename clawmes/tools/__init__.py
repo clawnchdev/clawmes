@@ -41,6 +41,7 @@ def register_all(ctx) -> None:
         defi_swap,
         market_intel,
         nft,
+        safe,
         transfer,
         yield_farming,
     )
@@ -60,6 +61,7 @@ def register_all(ctx) -> None:
         defi_balance,
         yield_farming,
         nft,
+        safe,
         analytics,
         market_intel,
         cost_basis,

@@ -81,6 +81,12 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         "api-polygon.reservoir.tools",
         # Yield aggregator
         "yields.llama.fi",
+        # Safe (Gnosis Safe Transaction Service) — per-chain hosts
+        "safe-transaction-mainnet.safe.global",
+        "safe-transaction-base.safe.global",
+        "safe-transaction-arbitrum.safe.global",
+        "safe-transaction-optimism.safe.global",
+        "safe-transaction-polygon.safe.global",
         # Bankr
         "api.bankr.bot",
         "llm.bankr.bot",

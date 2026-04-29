@@ -22,6 +22,7 @@ provides_tools:
   - defi_balance
   - yield
   - nft
+  - safe
   - analytics
   - market_intel
   - cost_basis
