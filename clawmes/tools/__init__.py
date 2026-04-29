@@ -28,6 +28,7 @@ def register_all(ctx) -> None:
     across v0.1.0 → v0.5.0; this list grows as each tool module lands.
     """
     from clawmes.tools import (
+        analytics,
         approvals,
         block_explorer,
         bridge,
@@ -53,6 +54,7 @@ def register_all(ctx) -> None:
         approvals,
         defi_price,
         defi_balance,
+        analytics,
         block_explorer,
     ):
         mod.register(ctx)

@@ -244,3 +244,62 @@ class TestSinglePrice:
         svc = CoinGeckoService()
         svc.start()
         assert svc.get_price("ethereum", "usd") is None
+
+
+class TestGetMarketChart:
+    def test_basic(self, fake_http):
+        fake_http.response = {
+            "prices": [[1, 100], [2, 110]],
+            "market_caps": [[1, 1_000_000]],
+            "total_volumes": [[1, 5_000_000]],
+        }
+        svc = CoinGeckoService()
+        svc.start()
+        result = svc.get_market_chart("ethereum", days=7)
+        assert result["prices"] == [[1, 100], [2, 110]]
+        # URL was constructed correctly
+        call = fake_http.calls[0]
+        assert "ethereum/market_chart" in call["url"]
+        assert call["params"]["vs_currency"] == "usd"
+        assert call["params"]["days"] == "7"
+
+    def test_default_30_days(self, fake_http):
+        fake_http.response = {"prices": []}
+        svc = CoinGeckoService()
+        svc.start()
+        svc.get_market_chart("bitcoin")
+        assert fake_http.calls[0]["params"]["days"] == "30"
+
+    def test_alt_vs_currency(self, fake_http):
+        fake_http.response = {"prices": []}
+        svc = CoinGeckoService()
+        svc.start()
+        svc.get_market_chart("ethereum", vs_currency="EUR")
+        # vs_currency lowercased
+        assert fake_http.calls[0]["params"]["vs_currency"] == "eur"
+
+    def test_token_id_lowercased(self, fake_http):
+        fake_http.response = {"prices": []}
+        svc = CoinGeckoService()
+        svc.start()
+        svc.get_market_chart("Ethereum")
+        # URL gets lowercased token id
+        assert "/coins/ethereum/market_chart" in fake_http.calls[0]["url"]
+
+    def test_api_key_header(self, monkeypatch, fake_http):
+        monkeypatch.setenv("COINGECKO_API_KEY", "cg-pro")
+        fake_http.response = {"prices": []}
+        svc = CoinGeckoService()
+        svc.start()
+        svc.get_market_chart("ethereum")
+        assert fake_http.calls[0]["headers"]["x-cg-pro-api-key"] == "cg-pro"
+
+    def test_non_dict_response(self, fake_http):
+        fake_http.response = "not a dict"  # type: ignore[assignment]
+        svc = CoinGeckoService()
+        svc.start()
+        result = svc.get_market_chart("ethereum")
+        # Returns the canonical empty shape
+        assert result["prices"] == []
+        assert result["market_caps"] == []
+        assert result["total_volumes"] == []

@@ -112,6 +112,29 @@ class CoinGeckoService(Service):
         hits.update(fetched)
         return hits
 
+    def get_market_chart(
+        self, token_id: str, *, vs_currency: str = "usd", days: int = 30
+    ) -> dict[str, list[list[float]]]:
+        """Historical OHLC-like data: prices, market_caps, total_volumes.
+
+        Returns the raw CoinGecko payload — three arrays of
+        ``[timestamp_ms, value]`` pairs. ``days`` controls granularity:
+        1 → 5-min, 2-90 → hourly, 91+ → daily. Used by ``analytics``
+        for technical indicators.
+        """
+        url = f"{_BASE_URL}/coins/{token_id.lower()}/market_chart"
+        params = {
+            "vs_currency": vs_currency.lower(),
+            "days": str(days),
+        }
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["x-cg-pro-api-key"] = self._api_key
+        result = http_get(url, params=params, headers=headers, timeout=15.0)
+        if not isinstance(result, dict):
+            return {"prices": [], "market_caps": [], "total_volumes": []}
+        return result
+
     def _fetch(self, token_ids: list[str], vs_currency: str) -> dict[str, float]:
         url = f"{_BASE_URL}/simple/price"
         params = {

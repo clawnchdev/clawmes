@@ -20,6 +20,7 @@ provides_tools:
   - approvals
   - defi_price
   - defi_balance
+  - analytics
   - block_explorer
 
 provides_hooks:
