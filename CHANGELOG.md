@@ -4,7 +4,11 @@ All notable changes to clawmes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.1.0 — 2026-04-29
+
+First versioned release. 45 of 48 PRD tools shipped at 100% test
+coverage. Plugin loads in Hermes, CLI subcommands wired,
+documentation in place.
 
 ### Added — full tool surface (45 of 48 PRD tools)
 
