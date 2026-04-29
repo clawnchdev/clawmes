@@ -1,8 +1,8 @@
 # clawmes
 
-> Hermes Agent for crypto. The hottest open-source AI assistant can now handle real money.
+> Hermes Agent for crypto.
 
-Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that turns Hermes into an infinitely extensible crypto-native assistant. It's a Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes instead of OpenClaw.
+Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
 45 tools. 27 commands. 14 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
@@ -133,7 +133,7 @@ hermes (the upstream CLI, hermes-agent ≥ 2026.4.x)
                     └── subprocess: clawmes-sa-bridge   (Node — MetaMask Smart Accounts; planned)
 ```
 
-Two bundled Node sub-process bridges (`clawmes-wc-bridge`, `clawmes-sa-bridge`) handle WalletConnect v2 sign-client and MetaMask Smart Accounts SDK respectively, communicated to via JSON-line RPC over stdio. They install on first plugin load via `npm ci` against pinned `package-lock.json` files in the wheel.
+Two bundled Node sub-process bridges (`clawmes-wc-bridge`, `clawmes-sa-bridge`) handle WalletConnect v2 sign-client and MetaMask Smart Accounts SDK respectively, talking JSON-line RPC over stdio. They install on first plugin load via `npm ci` against pinned `package-lock.json` files in the wheel.
 
 ## Configuration
 

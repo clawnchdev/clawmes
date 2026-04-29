@@ -84,6 +84,19 @@ Service).
   `sys.modules['clawmes']` aliasing so the same package loads
   correctly via Hermes' git-install path AND pytest.
 
+### Added — slash commands
+
+- 27 commands across `wallet` (7), `tx` (4), `policy` (5), `plans`
+  (10), `help` (1), and `doctor` (1).
+- `/doctor` surfaces wallet status, RPC endpoints (default vs. user
+  override), API keys (six grouped tables), WC bridge build status,
+  and plugin manifest counts. Runs entirely offline.
+- `PlanScheduler` exposes a real management API (`create_plan`,
+  `validate_plan`, `dry_run`, `list_plans`, `cancel_plan`,
+  `get_plan_logs`) for `compound_action` to dispatch into. Plans
+  persist as JSON under `${HERMES_HOME}/clawmes/plans/`. Trigger
+  evaluation lands in v0.2.0.
+
 ### Security
 
 - `SECURITY.md` — full threat model, recovery checklist, audit
@@ -95,7 +108,7 @@ Service).
 
 ### Tests
 
-- 1930 tests passing, 100% coverage on every commit during the
+- 1970 tests passing, 100% coverage on every commit during the
   implementation grind.
 - Plugin loading smoke test (`tests/test_plugin_loading.py`)
   exercises `register(ctx)` against a fake Hermes ctx with full
