@@ -28,6 +28,7 @@ def register_all(ctx) -> None:
     across v0.1.0 → v0.5.0; this list grows as each tool module lands.
     """
     from clawmes.tools import (
+        _user_tools,
         airdrop,
         analytics,
         approvals,
@@ -47,9 +48,13 @@ def register_all(ctx) -> None:
         defi_stake,
         defi_swap,
         farcaster,
+        giza,
         governance,
+        lobster_cash,
         market_intel,
         nft,
+        nookplot,
+        paysponge,
         safe,
         transfer,
         watch_activity,
@@ -82,9 +87,14 @@ def register_all(ctx) -> None:
         bankr_automate,
         bankr_polymarket,
         bankr_leverage,
+        paysponge,
+        lobster_cash,
         analytics,
         market_intel,
         cost_basis,
         block_explorer,
+        giza,
+        nookplot,
+        _user_tools,
     ):
         mod.register(ctx)

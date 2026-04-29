@@ -33,10 +33,15 @@ provides_tools:
   - bankr_automate
   - bankr_polymarket
   - bankr_leverage
+  - paysponge
+  - lobster_cash
   - analytics
   - market_intel
   - cost_basis
   - block_explorer
+  - giza
+  - nookplot
+  - _user_tools
 
 provides_hooks:
   - pre_tool_call
