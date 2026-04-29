@@ -1,22 +1,24 @@
-"""0x Swap API v2 client.
+"""0x Swap API v2 (Permit2) client.
 
 The 0x API is the canonical aggregator for Ethereum-family swaps —
 queries dozens of liquidity sources (Uniswap V2/V3/V4, Balancer,
 Curve, Sushiswap, etc.) and returns the best route. Used by hundreds
 of wallets including MetaMask, Coinbase Wallet, and Rainbow.
 
-Endpoints we consume:
+Endpoints we consume (v2 / Permit2 surface; v1 deprecated by 0x in
+2025-Q1):
 
-  * ``GET /swap/v1/price`` — read-only price + gas estimate
-    (no allowance commitment, no permit2 signature).
-  * ``GET /swap/v1/quote`` — full quote with calldata + permit2 EIP-712
-    payload. The user signs the permit2 and we broadcast the swap.
+  * ``GET /swap/permit2/price`` — read-only price + gas estimate
+    (no allowance commitment, no Permit2 signature).
+  * ``GET /swap/permit2/quote`` — full quote with calldata + Permit2
+    EIP-712 payload. The user signs the Permit2 and we broadcast the
+    swap.
 
 API key: required for production traffic. ``ZEROX_API_KEY`` env var.
 The free tier allows ~30 req/min unauthenticated; rate-limit errors
 surface with code ``rate_limited``.
 
-Why 0x over 1inch/LiFi: 0x has the cleanest permit2 integration,
+Why 0x over 1inch/LiFi: 0x has the cleanest Permit2 integration,
 which is also clawmes' default approval mechanism. 1inch and LiFi
 land in subsequent commits as alternative backends with the same
 quote shape (route comparison via ``defi_swap.route``).
@@ -190,12 +192,45 @@ class ZeroxService(Service):
                 "api_error",
                 f"0x returned non-dict response: {type(response).__name__}",
             )
-        # 0x error envelope: {"name": ..., "reason": ...} or {"validationErrors": [...]}
-        if "name" in response and "reason" in response:
-            reason = str(response.get("reason", ""))
-            code = "insufficient_liquidity" if "no liquidity" in reason.lower() else "api_error"
-            raise ZeroxError(code, f"0x {response['name']}: {reason}")
+        # v2 error envelope: {"name", "message", "data"}.
+        # v1 used {"name", "reason"} — handle both for transitional safety.
+        if "name" in response and ("message" in response or "reason" in response):
+            text = str(response.get("message") or response.get("reason") or "")
+            text_lower = text.lower()
+            code = (
+                "insufficient_liquidity"
+                if "no liquidity" in text_lower or "insufficient_liquidity" in text_lower
+                else "api_error"
+            )
+            raise ZeroxError(code, f"0x {response['name']}: {text}")
+        # v2 success-with-no-liquidity shape: {"liquidityAvailable": false, "zid": ...}
+        # The full response is only populated when liquidityAvailable is true.
+        if response.get("liquidityAvailable") is False:
+            raise ZeroxError(
+                "insufficient_liquidity",
+                "0x found no liquidity for this trade on this chain.",
+            )
         return response
+
+
+def parse_0x_int(value: str | int | None) -> int:
+    """Parse a 0x v2 integer field.
+
+    v2 returns decimal strings (e.g. ``"1000000000000000000"``). v1
+    returned hex (e.g. ``"0xde0b6b3a7640000"``). The 0x JS SDK uses
+    ``BigInt(...)`` which handles both transparently — we do the
+    same so we don't break if a chain still emits the old format.
+
+    Empty / None inputs return 0.
+    """
+    if value is None or value == "":
+        return 0
+    if isinstance(value, int):
+        return value
+    s = str(value).strip()
+    if s.startswith(("0x", "0X")):
+        return int(s, 16)
+    return int(s, 10)
 
 
 _instance: ZeroxService | None = None

@@ -302,17 +302,17 @@ def _handle_swap(
     transaction = quote.get("transaction") or {}
     to = transaction.get("to")
     data = transaction.get("data")
-    value_hex = transaction.get("value") or "0x0"
-    gas_hex = transaction.get("gas") or "0x0"
     if not to or not data:
         return error_result(
             "0x returned a quote without transaction calldata.",
             code="api_error",
         )
 
+    from clawmes.services.zerox import parse_0x_int
+
     try:
-        value = int(value_hex, 16) if isinstance(value_hex, str) else int(value_hex)
-        gas = int(gas_hex, 16) if isinstance(gas_hex, str) else int(gas_hex)
+        value = parse_0x_int(transaction.get("value"))
+        gas = parse_0x_int(transaction.get("gas"))
     except (TypeError, ValueError) as exc:
         return error_result(f"0x returned malformed gas/value: {exc}", code="api_error")
 

@@ -275,6 +275,94 @@ class TestErrorClassification:
             )
         assert exc_info.value.code == "insufficient_liquidity"
 
+    def test_v2_error_envelope_with_message(self, svc, fake_http):
+        """v2 returns {name, message, data}; the legacy path used reason."""
+        fake_http.responses.append(
+            {
+                "name": "INPUT_INVALID",
+                "message": "Invalid sellToken address",
+                "data": {"zid": "abc-123", "details": []},
+            }
+        )
+        with pytest.raises(ZeroxError) as exc_info:
+            svc.get_price(
+                chain_id=8453,
+                sell_token="0x",
+                buy_token="0x",
+                sell_amount=1,
+            )
+        assert exc_info.value.code == "api_error"
+        assert "INPUT_INVALID" in exc_info.value.message
+        assert "Invalid sellToken" in exc_info.value.message
+
+    def test_v2_no_liquidity_via_liquidity_available_false(self, svc, fake_http):
+        """v2 signals no-liquidity via {liquidityAvailable: false}, not an error."""
+        fake_http.responses.append({"liquidityAvailable": False, "zid": "abc-123"})
+        with pytest.raises(ZeroxError) as exc_info:
+            svc.get_price(
+                chain_id=8453,
+                sell_token="0x",
+                buy_token="0x",
+                sell_amount=1,
+            )
+        assert exc_info.value.code == "insufficient_liquidity"
+
+    def test_v2_no_liquidity_via_error_message_keyword(self, svc, fake_http):
+        """The 'insufficient_liquidity' keyword in v2 messages also classifies."""
+        fake_http.responses.append(
+            {
+                "name": "SWAP_VALIDATION_FAILED",
+                "message": "insufficient_liquidity for sellAmount",
+                "data": {"zid": "abc-123"},
+            }
+        )
+        with pytest.raises(ZeroxError) as exc_info:
+            svc.get_price(
+                chain_id=8453,
+                sell_token="0x",
+                buy_token="0x",
+                sell_amount=1,
+            )
+        assert exc_info.value.code == "insufficient_liquidity"
+
+
+class TestParseInt:
+    def test_decimal(self):
+        from clawmes.services.zerox import parse_0x_int
+
+        assert parse_0x_int("1000000000000000000") == 10**18
+
+    def test_hex(self):
+        from clawmes.services.zerox import parse_0x_int
+
+        assert parse_0x_int("0xde0b6b3a7640000") == 10**18
+
+    def test_hex_uppercase_prefix(self):
+        from clawmes.services.zerox import parse_0x_int
+
+        assert parse_0x_int("0XDE0B6B3A7640000") == 10**18
+
+    def test_int_passthrough(self):
+        from clawmes.services.zerox import parse_0x_int
+
+        assert parse_0x_int(42) == 42
+
+    def test_none_returns_zero(self):
+        from clawmes.services.zerox import parse_0x_int
+
+        assert parse_0x_int(None) == 0
+
+    def test_empty_returns_zero(self):
+        from clawmes.services.zerox import parse_0x_int
+
+        assert parse_0x_int("") == 0
+
+    def test_invalid_decimal_raises(self):
+        from clawmes.services.zerox import parse_0x_int
+
+        with pytest.raises(ValueError):
+            parse_0x_int("not-a-number")
+
 
 class TestQuoteAmountModes:
     def test_quote_with_buy_amount_only(self, svc, fake_http):

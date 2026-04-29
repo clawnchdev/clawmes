@@ -349,7 +349,7 @@ class TestSwap:
             "transaction": {
                 "to": "0x" + "1" * 40,
                 "data": "0xdead",
-                "value": "0x16345785d8a0000",  # 0.1 ETH
+                "value": "0x16345785d8a0000",  # 0.1 ETH (hex form)
                 "gas": "0x30000",
             },
         }
@@ -363,6 +363,31 @@ class TestSwap:
         )
         kwargs = fake_mode.send_transaction.call_args.kwargs
         assert kwargs["value"] == 0x16345785D8A0000
+
+    def test_swap_with_v2_decimal_value(self, connected, fake_zerox, fake_decimals, fake_mode):
+        """0x v2 returns gas/value as decimal strings; we must parse correctly."""
+        fake_zerox.get_quote.return_value = {
+            "sellAmount": "100000000000000000",
+            "buyAmount": "100",
+            "minBuyAmount": "99",
+            "transaction": {
+                "to": "0x" + "1" * 40,
+                "data": "0xdead",
+                "value": "100000000000000000",  # 0.1 ETH (decimal — v2 format)
+                "gas": "196608",
+            },
+        }
+        defi_swap(
+            {
+                "action": "swap",
+                "sell_token": "ETH",
+                "buy_token": USDC,
+                "sell_amount": "0.1",
+            }
+        )
+        kwargs = fake_mode.send_transaction.call_args.kwargs
+        # 0.1 ETH = 10^17 wei
+        assert kwargs["value"] == 10**17
 
     def test_swap_zerox_failure(self, connected, fake_zerox, fake_decimals, fake_mode):
         from clawmes.services.zerox import ZeroxError
