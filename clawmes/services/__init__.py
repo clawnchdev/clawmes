@@ -49,6 +49,7 @@ def start_all() -> None:
     from clawmes.services.token_decimals import get_token_decimals_service
     from clawmes.services.wallet import get_wallet_service
     from clawmes.services.wc_notifications import get_wc_notification_consumer
+    from clawmes.services.zerox import get_zerox_service
 
     factories = [
         # 1. Security primitives — credential redactor must be live
@@ -77,6 +78,9 @@ def start_all() -> None:
         # 6a. Bankr custodial-wallet HTTP client — read-only without
         #     BANKR_API_KEY; signing requires it.
         get_bankr_service,
+        # 6b. 0x DEX aggregator HTTP client. Read-only by definition;
+        #     swaps are signed locally by the wallet mode.
+        get_zerox_service,
         # 7. Background daemons — last so they pick up everything above.
         get_scheduler,  # ticking=True; needs cron driver to actually fire
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs

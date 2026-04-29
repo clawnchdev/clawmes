@@ -33,6 +33,7 @@ def register_all(ctx) -> None:
         clawnchconnect,
         defi_balance,
         defi_price,
+        defi_swap,
         transfer,
     )
 
@@ -42,6 +43,7 @@ def register_all(ctx) -> None:
     for mod in (
         clawnchconnect,
         transfer,
+        defi_swap,
         approvals,
         defi_price,
         defi_balance,
