@@ -1,0 +1,136 @@
+name: Release
+
+# Fires on any tag matching v*. Builds the wheel + sdist and publishes
+# to PyPI via Trusted Publishing (OIDC). No tokens, no .pypirc — PyPI
+# verifies the GitHub Actions run identity directly via OIDC.
+#
+# Setup (one-time, by maintainer):
+#   1. PyPI \u2192 your account \u2192 Publishing \u2192 Add a new pending publisher
+#       PyPI Project Name: clawmes
+#       Owner:             clawnchdev
+#       Repository name:   clawmes
+#       Workflow name:     release.yml
+#       Environment name:  pypi
+#   2. GitHub repo \u2192 Settings \u2192 Environments \u2192 New environment "pypi"
+#      (auto-created on first run, but recommended to pre-create
+#      so reviewers can be required before publish)
+#
+# Trigger a release:
+#   git tag -a v0.2.0 -m "v0.2.0"
+#   git push origin v0.2.0
+#
+# The workflow:
+#   1. Builds wheel + sdist
+#   2. Validates with twine check
+#   3. Publishes to PyPI (only on `pypi` environment)
+#   4. Creates a GitHub Release with the dist files attached
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Upgrade pip + install build
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Build wheel + sdist
+        run: python -m build
+
+      - name: Validate distribution
+        run: twine check dist/*
+
+      - name: Smoke-import from built wheel
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/python -c "
+          import clawmes
+          assert clawmes.__version__, 'no __version__'
+          from clawmes import register
+          assert callable(register), 'register not callable'
+          from clawmes.tools import register_all as reg
+          class Ctx:
+              n = 0
+              def register_tool(self, **kw):
+                  self.n += 1
+          c = Ctx(); reg(c)
+          assert c.n == 45, f'expected 45 tools, got {c.n}'
+          print(f'OK: clawmes {clawmes.__version__} \u2014 {c.n} tools register')
+          "
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+
+    # The "pypi" environment links to the Pending Publisher entry on
+    # PyPI \u2014 the OIDC token issued for this job will only be accepted
+    # by PyPI when the run targets this environment name.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/clawmes
+
+    permissions:
+      id-token: write   # required for Trusted Publishing OIDC
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        # No token argument \u2014 OIDC handles auth via the environment.
+        # The action auto-detects the trusted publisher config on PyPI.
+
+  github-release:
+    name: Update GitHub Release with built artifacts
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write   # required to upload to releases
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Upload artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # If the release exists (created manually before tagging),
+          # just upload the dist files. Otherwise create it.
+          TAG="${GITHUB_REF#refs/tags/}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.whl dist/*.tar.gz --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes "See CHANGELOG.md for details. Wheel + sdist attached." \
+              dist/*.whl dist/*.tar.gz
+          fi

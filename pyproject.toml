@@ -91,9 +91,23 @@ clawmes = [
     "skills/*/SKILL.md",
     "skills/*/scripts/*",
     "skills/*/references/*",
-    "bridges/sources/wc/**/*",
-    "bridges/sources/sa/**/*",
+    "bridges/sources/wc/package.json",
+    "bridges/sources/wc/package-lock.json",
+    "bridges/sources/wc/tsconfig.json",
+    "bridges/sources/wc/src/*.ts",
+    "bridges/sources/wc/dist/*.mjs",
+    "bridges/sources/wc/dist/*.js",
     "plugin.yaml",
+]
+
+# Belt-and-suspenders: excludes that match the wc/sa exclusion above
+# even if a future package-data pattern accidentally globs node_modules.
+[tool.setuptools.exclude-package-data]
+clawmes = [
+    "bridges/sources/*/node_modules/**",
+    "bridges/sources/*/.installed-hash",
+    "**/__pycache__/**",
+    "**/*.pyc",
 ]
 
 [tool.ruff]
