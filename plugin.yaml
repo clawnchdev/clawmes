@@ -90,3 +90,11 @@ requires_env:
     description: Basescan API key (block_explorer tool)
     url: https://basescan.org/myapikey
     secret: true
+  - name: OPENGATEWAY_API_KEY
+    description: gitlawb OpenGateway API key for the OpenAI-compatible LLM gateway (ogw_live_…)
+    url: https://gitlawb.com/opengateway
+    secret: true
+  - name: OPENGATEWAY_MODEL
+    description: Default model id sent to OpenGateway when callers do not pass model= (optional)
+    url: https://gitlawb.com/opengateway
+    secret: false

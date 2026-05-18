@@ -141,7 +141,7 @@ hermes (the upstream CLI, hermes-agent ≥ 2026.4.x)
               ├── 11 hooks     (pre_tool_call, post_tool_call, pre_llm_call, ...)
               ├── 27 skills    (registered via ctx.register_skill, namespaced clawmes:*)
               ├── CLI subcmds  (registered via ctx.register_cli_command)
-              └── 14 services  (start_all() starts background lifecycle)
+              └── 15 services  (start_all() starts background lifecycle)
                     │
                     ├── subprocess: clawmes-wc-bridge   (Node — WalletConnect v2)
                     └── subprocess: clawmes-sa-bridge   (Node — MetaMask Smart Accounts; planned)
@@ -186,6 +186,10 @@ CLAWMES_RPC_<chain_id>=  # override per-chain RPC URL
 # DEX / bridge aggregators
 ZEROX_API_KEY=
 LIFI_API_KEY=
+
+# LLM inference gateway (gitlawb opengateway — OpenAI-compatible)
+OPENGATEWAY_API_KEY=  # ogw_live_… — required for OpenGatewayService.chat_completion
+OPENGATEWAY_MODEL=    # optional default model id sent when callers omit model=
 
 # Market data + analytics
 COINGECKO_API_KEY=

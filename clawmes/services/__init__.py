@@ -44,6 +44,7 @@ def start_all() -> None:
     from clawmes.services.explorer import get_explorer_service
     from clawmes.services.lifi import get_lifi_service
     from clawmes.services.mode_service import get_mode_service
+    from clawmes.services.opengateway import get_opengateway_service
     from clawmes.services.persona_service import get_persona_service
     from clawmes.services.price import get_price_service
     from clawmes.services.rpc import get_rpc_service
@@ -84,6 +85,11 @@ def start_all() -> None:
         get_zerox_service,
         # 6c. LiFi cross-chain bridge aggregator. Same shape as 0x.
         get_lifi_service,
+        # 6d. OpenAI-compatible LLM gateway (gitlawb opengateway). Used
+        #     by tools that need targeted inference outside the host
+        #     Hermes agent loop. Independent from Hermes' main LLM —
+        #     the agent's conversational inference is owned upstream.
+        get_opengateway_service,
         # 7. Background daemons — last so they pick up everything above.
         get_scheduler,  # ticking=True; needs cron driver to actually fire
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs

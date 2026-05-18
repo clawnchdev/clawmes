@@ -90,6 +90,8 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         # Bankr
         "api.bankr.bot",
         "llm.bankr.bot",
+        # LLM inference gateway (gitlawb opengateway — see services.opengateway)
+        "opengateway.gitlawb.com",
         # Simulation
         "api.tenderly.co",
         # Fiat ramps

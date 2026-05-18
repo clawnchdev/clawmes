@@ -4,6 +4,22 @@ All notable changes to clawmes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `OpenGatewayService` (`clawmes/services/opengateway.py`) — OpenAI-
+  compatible LLM client for the gitlawb OpenGateway endpoint
+  (`https://opengateway.gitlawb.com/v1`). Ships under the gitlawb
+  partnership. Non-streaming chat completions only; streaming remains
+  Hermes' responsibility upstream. New env vars: `OPENGATEWAY_API_KEY`
+  (required for `chat_completion` calls) and `OPENGATEWAY_MODEL`
+  (optional default model). `opengateway.gitlawb.com` added to
+  `clawmes/lib/http.py` allowlist. Registered as service 6d in
+  `services.start_all` between LiFi and the background daemons. No
+  internal consumer wired in this change — first consumers will land
+  in follow-up PRs as specific tools opt in.
+
 ## 0.1.0 — 2026-04-29
 
 First versioned release. 45 of 48 PRD tools shipped at 100% test
