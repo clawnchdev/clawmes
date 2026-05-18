@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Documentation
+
+- README "Using OpenGateway as your LLM provider" section documents
+  both integration modes: Mode 1 routes the whole Hermes stack
+  through OpenGateway via `hermes model` (config-only, no code), and
+  Mode 2 lets specific clawmes tools opt into targeted LLM calls via
+  `OpenGatewayService`.
+
 ### Added
 
 - `OpenGatewayService` (`clawmes/services/opengateway.py`) — OpenAI-

@@ -222,6 +222,40 @@ CLAWNCH_LAUNCHPAD_ADDRESS=
 
 The setup wizard (`hermes clawmes init`) walks through the most-used keys interactively with live validation.
 
+### Using OpenGateway as your LLM provider
+
+Clawmes ships under a partnership with [gitlawb OpenGateway](https://gitlawb.com/opengateway) — an OpenAI-compatible inference gateway that routes a single endpoint across model providers (Xiaomi MiMo, GMI Cloud, more). There are two integration modes; you can use either or both.
+
+**Mode 1 — Route the whole Hermes stack through OpenGateway (recommended for most users).**
+
+Hermes already supports any OpenAI-compatible endpoint as a "custom" provider. Point it at OpenGateway via `hermes model`:
+
+```
+$ hermes model
+# Pick: "custom endpoint" (or equivalent in your Hermes version)
+# Base URL:  https://opengateway.gitlawb.com/v1
+# API key:   ogw_live_…   (sign in at https://gitlawb.com/opengateway/dashboard to generate one)
+# Model:     mimo-v2.5-pro (or any model OpenGateway routes; check https://opengateway.gitlawb.com/health)
+```
+
+This is config-only — no clawmes code change required. Every LLM call the agent makes (conversation, tool routing, summarization, everything Hermes drives) goes through OpenGateway, with secrets staying server-side. During the gitlawb partnership window the gateway accepts unauthenticated traffic, so you can try it without a key — but auth will become required, so generate one early.
+
+**Mode 2 — Targeted LLM calls from clawmes tools (advanced).**
+
+Clawmes also ships `OpenGatewayService` (`clawmes/services/opengateway.py`) — a service that gives any clawmes tool a first-class LLM client for subtasks outside the main agent loop (intent classification, swap-parameter extraction, governance-proposal summarization, etc). Tools opt in by calling:
+
+```python
+from clawmes.services.opengateway import get_opengateway_service
+
+result = get_opengateway_service().chat_completion(
+    messages=[{"role": "user", "content": "..."}],
+    model="mimo-v2.5-pro",
+)
+content = result["choices"][0]["message"]["content"]
+```
+
+This is independent from Mode 1 — Mode 2 calls go to OpenGateway regardless of which provider Hermes itself uses. Configure via the `OPENGATEWAY_API_KEY` / `OPENGATEWAY_MODEL` env vars above.
+
 ## Development
 
 ```bash
