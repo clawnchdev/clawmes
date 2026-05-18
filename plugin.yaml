@@ -91,7 +91,7 @@ requires_env:
     url: https://basescan.org/myapikey
     secret: true
   - name: OPENGATEWAY_API_KEY
-    description: gitlawb OpenGateway API key for the OpenAI-compatible LLM gateway (ogw_live_…)
+    description: gitlawb OpenGateway API key (ogw_live_…); recommended but currently optional during the partnership window
     url: https://gitlawb.com/opengateway
     secret: true
   - name: OPENGATEWAY_MODEL

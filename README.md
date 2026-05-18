@@ -188,7 +188,8 @@ ZEROX_API_KEY=
 LIFI_API_KEY=
 
 # LLM inference gateway (gitlawb opengateway — OpenAI-compatible)
-OPENGATEWAY_API_KEY=  # ogw_live_… — required for OpenGatewayService.chat_completion
+OPENGATEWAY_API_KEY=  # ogw_live_… — recommended; service runs unauthenticated without it
+                      # during the gitlawb partnership window (auth optional today)
 OPENGATEWAY_MODEL=    # optional default model id sent when callers omit model=
 
 # Market data + analytics

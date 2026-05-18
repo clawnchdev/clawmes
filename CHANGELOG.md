@@ -12,13 +12,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   compatible LLM client for the gitlawb OpenGateway endpoint
   (`https://opengateway.gitlawb.com/v1`). Ships under the gitlawb
   partnership. Non-streaming chat completions only; streaming remains
-  Hermes' responsibility upstream. New env vars: `OPENGATEWAY_API_KEY`
-  (required for `chat_completion` calls) and `OPENGATEWAY_MODEL`
-  (optional default model). `opengateway.gitlawb.com` added to
-  `clawmes/lib/http.py` allowlist. Registered as service 6d in
-  `services.start_all` between LiFi and the background daemons. No
-  internal consumer wired in this change — first consumers will land
-  in follow-up PRs as specific tools opt in.
+  Hermes' responsibility upstream. Calls without `OPENGATEWAY_API_KEY`
+  are sent unauthenticated (matches gitlawb's partnership-window
+  policy of "auth optional today, required soon") — service emits a
+  startup warning so the future auth flip is not a total surprise.
+  Setting the key is strongly recommended in production for
+  attribution and rate-limit isolation. Live-probed against the real
+  gateway; the structured-error body is pulled from the raised
+  `httpx.HTTPStatusError.response` so users see real upstream messages
+  (`"opengateway error (unsupported_model): Unsupported model …"`)
+  instead of useless `"Client error '400 Bad Request' for url …"`.
+  Sends `Accept-Encoding: identity` per-request to work around a
+  verified upstream bug where the gateway advertises gzip on some 2xx
+  responses but returns bodies that fail zlib decompression. New env
+  vars: `OPENGATEWAY_API_KEY` (recommended; OpenAI-style
+  `ogw_live_…` format) and `OPENGATEWAY_MODEL` (optional default
+  model id). `opengateway.gitlawb.com` added to `clawmes/lib/http.py`
+  allowlist. Registered as service 6d in `services.start_all` between
+  LiFi and the background daemons. No internal consumer wired in this
+  change — first consumers land in follow-up PRs as specific tools
+  opt in.
 
 ## 0.1.0 — 2026-04-29
 
