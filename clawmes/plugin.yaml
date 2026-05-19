@@ -36,6 +36,8 @@ provides_tools:
   - paysponge
   - lobster_cash
   - bv7x
+  - bv7x_oracle
+  - bv7x_market
   - eas_attestation
   - a2a_call
   - analytics
@@ -92,6 +94,10 @@ requires_env:
   - name: BASESCAN_API_KEY
     description: Basescan API key (block_explorer tool)
     url: https://basescan.org/myapikey
+    secret: true
+  - name: BV7X_API_KEY
+    description: BV-7X session token (after wallet-verify at bv7x.ai/terminal#developer); required for token-gated oracle + copy-trade endpoints
+    url: https://bv7x.ai/terminal#developer
     secret: true
   - name: OPENGATEWAY_API_KEY
     description: gitlawb OpenGateway API key (ogw_live_…); recommended but currently optional during the partnership window

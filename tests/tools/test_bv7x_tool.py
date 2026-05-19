@@ -92,9 +92,47 @@ class TestErrorPropagation:
         assert out["details"]["error_code"] == "rate_limited"
 
     def test_token_gated(self, fake_http):
-        fake_http.responses.append(RuntimeError("requires BV7X token"))
+        fake_http.responses.append(RuntimeError("HTTP 402 token gate"))
         out = _call("regime")
         assert out["details"]["error_code"] == "token_gated"
+
+
+class TestReputation:
+    def test_basic(self, fake_http):
+        fake_http.responses.append({"score": 0.91})
+        out = _call("reputation")
+        assert out["details"]["score"] == 0.91
+        assert "0.91" in out["content"][0]["text"]
+
+
+class TestA2ATask:
+    def test_basic(self, fake_http):
+        fake_http.responses.append({"id": "t-1", "status": "running"})
+        out = json.loads(bv7x({"action": "a2a_task", "task_id": "t-1"}))
+        assert "running" in out["content"][0]["text"]
+
+    def test_missing_task_id(self):
+        out = json.loads(bv7x({"action": "a2a_task"}))
+        assert out["details"]["error_code"] == "param_error"
+
+
+class TestCommerce:
+    def test_basic(self, fake_http):
+        fake_http.responses.append({"offerings": [{"id": "a"}, {"id": "b"}]})
+        out = _call("commerce")
+        assert "2 offering(s)" in out["content"][0]["text"]
+
+    def test_empty_offerings(self, fake_http):
+        fake_http.responses.append({"offerings": []})
+        out = _call("commerce")
+        assert "0 offering(s)" in out["content"][0]["text"]
+
+
+class TestCopyTradeStatus:
+    def test_basic(self, fake_http):
+        fake_http.responses.append({"status": "live"})
+        out = _call("copy_trade_status")
+        assert "live" in out["content"][0]["text"]
 
 
 class TestInvalidAction:

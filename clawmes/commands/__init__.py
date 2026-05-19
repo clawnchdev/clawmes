@@ -14,6 +14,9 @@ rejected.
 from __future__ import annotations
 
 from clawmes.commands import (
+    bv7x as bv7x_cmd,
+)
+from clawmes.commands import (
     doctor,
     plans,
     policy,
@@ -35,6 +38,7 @@ def register_all(ctx) -> None:
     tx.register(ctx)
     plans.register(ctx)
     doctor.register(ctx)
+    bv7x_cmd.register(ctx)
     # TODO(v0.1.0+): onboarding, model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills, channel

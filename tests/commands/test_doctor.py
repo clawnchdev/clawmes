@@ -166,8 +166,8 @@ class TestPluginSection:
     def test_real_manifest_counts(self):
         section = _plugin_section()
         assert "Tools registered:" in section.body
-        # 45 at 0.1.0 + bv7x + eas_attestation + a2a_call = 48
-        assert "48" in section.body
+        # 45 at 0.1.0 + bv7x + bv7x_oracle + bv7x_market + eas_attestation + a2a_call = 50
+        assert "50" in section.body
         assert "Hooks registered:" in section.body
         assert "11" in section.body  # 11 hooks
         assert "Commands registered:" in section.body
