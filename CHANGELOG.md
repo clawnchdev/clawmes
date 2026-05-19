@@ -101,6 +101,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the default + per-call `extra_hosts` checks, and records blocks for
   audit. Defensive import — if the services subsystem hasn't started
   yet, the existing default-allowlist behavior continues to work.
+- **Evolution-mode gate** for self-modifying tools
+  (`clawmes/services/evolution_mode.py`). Default OFF. When OFF,
+  the write actions of `agent_memory` (`add` / `replace` / `remove`)
+  and `skill_evolve` (`propose` / `update` / `revert`) return
+  `evolution_gate` errors. Read actions (`query`, `list`) are always
+  allowed. Closes a safety hole: previously the agent could rewrite
+  its own memory and skills with no gate, which made
+  prompt-injection drift much easier. Equivalent to OpenClawnch's
+  `wrapWithEvoGate` (`extensions/crypto/index.ts:402-419`).
+- 3 commands wrapping the new service: `/evolve` (enable),
+  `/stable` (disable, the safe default), `/evolution` (status).
+- 2 wrapper commands over `defi_balance`: `/balance [chain]` (native
+  balance) and `/portfolio [chain]` (native + curated common-token
+  list). Both pick up the wallet address + chain from
+  `wallet_service`; both are pure surface deltas over an existing
+  read-only tool.
 
 ### Documentation
 

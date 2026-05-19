@@ -58,6 +58,17 @@ _SCHEMA: dict[str, Any] = {
 )
 def agent_memory(args: dict[str, Any], **kwargs: Any) -> str:
     action = read_str(args, "action", required=True)
+    if action in ("add", "replace", "remove"):
+        from clawmes.services.evolution_mode import is_evolving
+
+        if not is_evolving():
+            return error_result(
+                "Evolution mode is disabled. agent_memory write actions "
+                "(add / replace / remove) require /evolve. Use /evolution "
+                "to check status; the safe default is OFF so a "
+                "prompt-injected LLM can't silently rewrite your memory.",
+                code="evolution_gate",
+            )
     provider = _resolve_provider()
     if provider is None:
         return error_result(

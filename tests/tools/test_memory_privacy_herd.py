@@ -12,11 +12,18 @@ import pytest
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
     from clawmes.policy import storage as policy_storage
+    from clawmes.services import evolution_mode as evo_mod
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     for k in ("HERD_ACCESS_TOKEN", "LOBSTER_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     policy_storage.save_policies([])
+    # The agent_memory and skill_evolve write actions are now gated by
+    # evolution_mode (default off). Enable it for the existing tests
+    # so write-action assertions continue to work; gating behavior is
+    # tested separately in test_evolution_mode tests.
+    monkeypatch.setattr(evo_mod, "_instance", None)
+    evo_mod.get_evolution_mode_service().set_evolving(True)
 
 
 def _stub(monkeypatch, module_path: str, attr: str, response):
