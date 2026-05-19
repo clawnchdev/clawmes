@@ -35,6 +35,9 @@ provides_tools:
   - bankr_leverage
   - paysponge
   - lobster_cash
+  - bv7x
+  - eas_attestation
+  - a2a_call
   - analytics
   - market_intel
   - cost_basis

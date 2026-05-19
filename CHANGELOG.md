@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added — agent-economy integration (BV-7X / A2A / EAS)
+
+- **`bv7x` tool** (`clawmes/tools/bv7x.py`) + **`BV7XService`**
+  (`clawmes/services/bv7x.py`) — read BV-7X autonomous BTC oracle data
+  via their public REST API. Three actions: `regime` (BTC market
+  regime classification: CRISIS / BEAR / NEUTRAL / BULL / EUPHORIA),
+  `identity` (BV-7X's ERC-8004 agent identity + reputation),
+  `discover` (A2A discovery card). 60-second cache. Token-gated
+  premium endpoints (`/oracle`, `/copy-trade`) are NOT exposed —
+  clawmes does not require third-party token holdings.
+- **`a2a_call` tool** (`clawmes/tools/a2a_call.py`) — generic
+  agent-to-agent JSON-RPC 2.0 client. `discover` fetches a peer's
+  AgentCard at `/.well-known/agent-card.json`; `send_task` posts
+  JSON-RPC 2.0 tasks (default path `/api/bv7x/a2a/tasks/send`,
+  configurable). Works with any A2A-speaking peer; tested against
+  BV-7X. Auth via DID signatures (RFC 9421) is deferred to a
+  follow-up that pairs with the IdentityService.
+- **`eas_attestation` tool** (`clawmes/tools/eas_attestation.py`) —
+  read EAS attestations on Base. `get` fetches by 32-byte UID,
+  decoded into the canonical Attestation struct (uid, schema, time,
+  recipient, attester, data, etc.). `decode_data` parses the raw
+  bytes payload against a caller-supplied ABI schema. Generic
+  on-chain primitive — useful for BV-7X signal attestations, trust
+  scores, KYC certificates, and any EAS-using protocol. Default
+  contract is the canonical EAS singleton on Base
+  (`0x4200…0021`); overridable via `eas_address` for other L2s.
+- `bv7x.ai` added to `clawmes/lib/http.py` allowlist.
+
+### Deferred
+
+- **ERC-8004 agent registry integration.** The spec is currently a
+  draft EIP (Created 2025-08-13) with no canonical Base-singleton
+  address yet. We'll wire this in once the spec finalizes and a
+  registry singleton lands.
+
 ### Documentation
 
 - README "Using OpenGateway as your LLM provider" section documents
