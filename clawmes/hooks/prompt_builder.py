@@ -15,6 +15,9 @@ Sources we read:
   * ``services.wallet.get_wallet_state()`` — connected wallet + chain
   * ``services.persona_service``           — active persona snippet
   * ``services.mode_service``              — readonly / danger mode flag
+  * ``services.command_history``           — last few slash commands the
+    user ran (so the agent doesn't re-ask things just answered via
+    /balance, /portfolio, etc.)
 
 Sources scheduled for follow-ups:
   * ``services.session_recall`` — past-conversation summary (TODO)
@@ -45,6 +48,7 @@ def callback(*, session_key: str | None = None, **kwargs: Any) -> dict[str, str]
     _append_wallet(pieces)
     _append_mode(pieces)
     _append_persona(pieces)
+    _append_command_history(pieces)
 
     if not pieces:
         return None
@@ -99,3 +103,29 @@ def _append_persona(pieces: list[str]) -> None:
             pieces.append(f"[clawmes/persona]\n{snippet.strip()}")
     except Exception:  # noqa: BLE001
         _log.exception("failed to read persona for prompt context")
+
+
+def _append_command_history(pieces: list[str]) -> None:
+    """Inject the last few slash-command calls + truncated summaries.
+
+    Capped at 5 entries to keep prompt-cache impact small. Each entry
+    is one or two lines. If the ring is empty, this is a no-op so we
+    don't waste context on an empty block.
+    """
+    try:
+        from clawmes.services.command_history import get_command_history_service
+
+        entries = get_command_history_service().recent(limit=5)
+        if not entries:
+            return
+        lines = ["[clawmes/recent-commands]"]
+        for entry in entries:
+            args = f" {entry['args']}" if entry.get("args") else ""
+            summary = entry.get("summary", "")
+            head = summary.splitlines()[0] if summary else ""
+            if len(head) > 120:
+                head = head[:117] + "..."
+            lines.append(f"  /{entry['name']}{args} -> {head}")
+        pieces.append("\n".join(lines))
+    except Exception:  # noqa: BLE001
+        _log.exception("failed to read command history for prompt context")

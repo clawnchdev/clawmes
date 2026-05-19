@@ -40,6 +40,7 @@ def start_all() -> None:
     from clawmes.plans.scheduler import get_scheduler
     from clawmes.services.bankr_service import get_bankr_service
     from clawmes.services.coingecko import get_coingecko_service
+    from clawmes.services.command_history import get_command_history_service
     from clawmes.services.credential_redactor import get_credential_redactor
     from clawmes.services.endpoint_allowlist import get_endpoint_allowlist_service
     from clawmes.services.evolution_mode import get_evolution_mode_service
@@ -77,6 +78,10 @@ def start_all() -> None:
         # 2c. Evolution-mode gate — read by agent_memory / skill_evolve
         #     write actions. Default disabled; user opts in via /evolve.
         get_evolution_mode_service,
+        # 2d. Command-history ring — populated by slash-command handlers
+        #     that opt in via record_command_call(); read by pre_llm_call
+        #     so the agent sees what the user just ran.
+        get_command_history_service,
         # 3. RPC client — read-side foundation; many other services
         #    (token_decimals, wallet, balance tools) depend on it.
         get_rpc_service,
