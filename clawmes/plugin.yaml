@@ -35,6 +35,7 @@ provides_tools:
   - bankr_leverage
   - paysponge
   - lobster_cash
+  - policy_manage
   - analytics
   - market_intel
   - cost_basis
