@@ -29,6 +29,9 @@ from clawmes.commands import (
     wallet_recovery,
 )
 from clawmes.commands import (
+    bv7x as bv7x_cmd,
+)
+from clawmes.commands import (
     help as help_cmd,
 )
 
@@ -51,6 +54,7 @@ def register_all(ctx) -> None:
     evolve.register(ctx)
     info.register(ctx)
     identity.register(ctx)
+    bv7x_cmd.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel
