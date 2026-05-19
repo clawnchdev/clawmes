@@ -44,6 +44,7 @@ def start_all() -> None:
     from clawmes.services.explorer import get_explorer_service
     from clawmes.services.lifi import get_lifi_service
     from clawmes.services.mode_service import get_mode_service
+    from clawmes.services.onboarding_service import get_onboarding_service
     from clawmes.services.opengateway import get_opengateway_service
     from clawmes.services.persona_service import get_persona_service
     from clawmes.services.price import get_price_service
@@ -63,6 +64,10 @@ def start_all() -> None:
         # 2a. Persona service — read by the pre_llm_call hook to inject
         #     the active persona snippet into the per-turn context.
         get_persona_service,
+        # 2b. Onboarding service — holds per-sender step state, capability
+        #     picks, and step history for /skip and /back. Pure in-memory;
+        #     persisted-to-disk variant is future work.
+        get_onboarding_service,
         # 3. RPC client — read-side foundation; many other services
         #    (token_decimals, wallet, balance tools) depend on it.
         get_rpc_service,
