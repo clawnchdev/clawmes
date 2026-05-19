@@ -39,6 +39,7 @@ def start_all() -> None:
     """
     from clawmes.plans.scheduler import get_scheduler
     from clawmes.services.bankr_service import get_bankr_service
+    from clawmes.services.bv7x import get_bv7x_service
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.command_history import get_command_history_service
     from clawmes.services.credential_redactor import get_credential_redactor
@@ -109,6 +110,10 @@ def start_all() -> None:
         get_zerox_service,
         # 6c. LiFi cross-chain bridge aggregator. Same shape as 0x.
         get_lifi_service,
+        # 6e. BV-7X autonomous BTC oracle (public REST API).
+        #     Daily signal, regime, ETF flows, agent identity. The
+        #     token-gated premium endpoints are deliberately NOT wired.
+        get_bv7x_service,
         # 6d. OpenAI-compatible LLM gateway (gitlawb opengateway). Used
         #     by tools that need targeted inference outside the host
         #     Hermes agent loop. Independent from Hermes' main LLM —
