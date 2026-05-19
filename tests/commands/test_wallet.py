@@ -468,7 +468,7 @@ class TestAddress:
 
 
 class TestRegister:
-    def test_registers_seven_commands(self):
+    def test_registers_eight_commands(self):
         recorded = []
 
         class FakeCtx:
@@ -479,9 +479,57 @@ class TestRegister:
         assert set(recorded) == {
             "wallet",
             "connect",
+            "connect_local",
             "connect_bankr",
             "disconnect",
             "mode",
             "chain",
             "address",
         }
+
+
+class TestConnectLocal:
+    @pytest.mark.asyncio
+    async def test_usage_message(self):
+        out = await wallet_cmd.handle_connect_local("")
+        assert "Usage:" in out
+        assert "/create_wallet" in out
+        assert "/recover" in out
+
+    @pytest.mark.asyncio
+    async def test_load_success(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def _connect(password, **kw):
+            return WalletState.for_chain(
+                mode="local",
+                address="0x" + "1" * 40,
+                chain_id=8453,
+            )
+
+        monkeypatch.setattr(svc, "connect_local_key", _connect)
+        out = await wallet_cmd.handle_connect_local("hunter2")
+        assert "Local wallet connected" in out
+        assert "0x" + "1" * 40 in out
+
+    @pytest.mark.asyncio
+    async def test_load_keystore_error(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.keystore import KeystoreError
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        def _raise(password, **kw):
+            raise KeystoreError("no local keystore found")
+
+        monkeypatch.setattr(svc, "connect_local_key", _raise)
+        out = await wallet_cmd.handle_connect_local("hunter2")
+        assert "Local wallet load failed" in out
+        assert "no local keystore found" in out

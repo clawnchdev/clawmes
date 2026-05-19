@@ -163,6 +163,46 @@ class WalletService(Service):
         self.set_mode(mode)
         return mode.connect(chain_id=chain_id)
 
+    # --- Local-key convenience ------------------------------------------
+
+    def connect_local_key(
+        self,
+        password: str,
+        *,
+        mnemonic: str | None = None,
+        generate: bool = False,
+        account_index: int = 0,
+    ) -> WalletState:
+        """Materialize a :class:`LocalKeyMode` and connect.
+
+        Three call shapes:
+
+          * **Load** — ``password`` only. Reads the persisted keystore at
+            ``${HERMES_HOME}/clawmes/wallet/keystore.bin`` and decrypts.
+            Raises :class:`clawmes.wallet.keystore.KeystoreError` if no
+            keystore exists or the password is wrong.
+          * **Import** — ``password`` + ``mnemonic``. Encrypts the
+            provided mnemonic under ``password`` and persists.
+          * **Generate** — ``password`` + ``generate=True``. Generates a
+            fresh BIP-39 mnemonic and persists encrypted. The returned
+            :class:`WalletState` carries the mnemonic in
+            ``balances['_mnemonic']`` for one-time display — the caller
+            MUST surface this to the user; it's their only chance to
+            back it up.
+
+        ``account_index`` selects the BIP-44 sub-account (default 0).
+        """
+        from clawmes.wallet.local_key import LocalKeyMode
+
+        mode = LocalKeyMode()
+        self.set_mode(mode)
+        return mode.connect(
+            password=password,
+            mnemonic=mnemonic,
+            generate=generate,
+            account_index=account_index,
+        )
+
     # --- WalletConnect convenience --------------------------------------
 
     def connect_walletconnect(self) -> WalletState:

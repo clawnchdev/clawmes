@@ -55,6 +55,34 @@ async def handle_connect(raw_args: str) -> str:
     )
 
 
+async def handle_connect_local(raw_args: str) -> str:
+    from clawmes.services.wallet import get_wallet_service
+    from clawmes.wallet.keystore import KeystoreError
+
+    password = raw_args.strip()
+    if not password:
+        return (
+            "Connect a local-key wallet (existing keystore).\n\n"
+            "Usage:\n"
+            "  /connect_local <password>\n\n"
+            "If you don't have a keystore yet, use /create_wallet to generate "
+            "one or /recover to import an existing mnemonic. The local-key "
+            "mode keeps the encrypted seed on disk; signing happens locally."
+        )
+
+    svc = get_wallet_service()
+    try:
+        state = svc.connect_local_key(password)
+    except KeystoreError as exc:
+        return f"Local wallet load failed: {exc}"
+    return (
+        f"Local wallet connected.\n"
+        f"  Address: {state.address}\n"
+        f"  Chain:   {state.chain_name}\n"
+        f"  Mode:    local (encrypted keystore on disk)"
+    )
+
+
 async def handle_connect_bankr(raw_args: str) -> str:
     from clawmes.services.bankr_service import BankrError
     from clawmes.services.wallet import get_wallet_service
@@ -163,6 +191,12 @@ def register(ctx) -> None:
         name="connect",
         handler=handle_connect,
         description="Pair a wallet via WalletConnect v2",
+    )
+    ctx.register_command(
+        name="connect_local",
+        handler=handle_connect_local,
+        description="Load an existing local-key keystore (requires password)",
+        args_hint="<password>",
     )
     ctx.register_command(
         name="connect_bankr",
