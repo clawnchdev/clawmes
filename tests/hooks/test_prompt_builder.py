@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from clawmes.hooks.prompt_builder import MAX_INJECT_CHARS, callback
+from clawmes.services import command_history as command_history_module
 from clawmes.services import mode_service as mode_module
 from clawmes.services import persona_service as persona_module
 from clawmes.wallet.state import WalletState
@@ -14,9 +15,10 @@ from clawmes.wallet.state import WalletState
 
 @pytest.fixture(autouse=True)
 def _reset_singletons(monkeypatch):
-    """Each test gets a fresh mode + persona service."""
+    """Each test gets a fresh mode + persona + command-history service."""
     monkeypatch.setattr(mode_module, "_instance", None)
     monkeypatch.setattr(persona_module, "_instance", None)
+    monkeypatch.setattr(command_history_module, "_instance", None)
 
 
 class TestNoSources:

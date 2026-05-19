@@ -36,6 +36,7 @@ provides_tools:
   - paysponge
   - lobster_cash
   - policy_manage
+  - agent_identity
   - analytics
   - market_intel
   - cost_basis
