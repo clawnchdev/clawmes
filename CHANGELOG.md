@@ -46,6 +46,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   don't go through the `@write_tool` policy gate (no clawmes
   infrastructure for that today); the password barrier is the
   safety boundary. Commit message + module docstring spell this out.
+- 5 discoverability slash commands (`clawmes/commands/discovery.py`).
+  Each wraps existing data with zero new dependencies and no new
+  service.
+    - `/skills` — list bundled clawmes skills by walking
+      `clawmes/skills/*/SKILL.md` and reading the YAML-frontmatter
+      `description:` line.
+    - `/persona` — show the active persona (or list the 5 built-in
+      personas when none is active).
+    - `/chains` — list every EVM chain in `clawmes/lib/chains.CHAINS`
+      with RPC-configured indicator and a default-chain marker.
+    - `/tools_list` — list every clawmes tool declared in
+      `plugin.yaml`'s `provides_tools` array.
+    - `/safety_status` — show current `mode_service` mode (normal /
+      readonly / danger) with context on what each mode means for
+      write tools.
 
 ### Documentation
 
