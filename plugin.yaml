@@ -37,6 +37,9 @@ provides_tools:
   - lobster_cash
   - policy_manage
   - agent_identity
+  - bv7x
+  - eas_attestation
+  - a2a_call
   - analytics
   - market_intel
   - cost_basis

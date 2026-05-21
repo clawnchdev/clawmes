@@ -29,6 +29,7 @@ def register_all(ctx) -> None:
     """
     from clawmes.tools import (
         _user_tools,
+        a2a_call,
         agent_identity,
         agent_memory,
         airdrop,
@@ -41,6 +42,7 @@ def register_all(ctx) -> None:
         block_explorer,
         bridge,
         browser,
+        bv7x,
         clawnch_fees,
         clawnch_launch,
         clawnchconnect,
@@ -52,6 +54,7 @@ def register_all(ctx) -> None:
         defi_price,
         defi_stake,
         defi_swap,
+        eas_attestation,
         farcaster,
         giza,
         governance,
@@ -127,6 +130,9 @@ def register_all(ctx) -> None:
         manage_orders,
         liquidity,
         browser,
+        bv7x,
+        eas_attestation,
+        a2a_call,
         _user_tools,
     ):
         mod.register(ctx)
