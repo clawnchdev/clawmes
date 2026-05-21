@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 76 commands. 22 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 73 commands. 21 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-76 slash commands across 15 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+73 slash commands across 14 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -85,7 +85,6 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Info** (5) | `/history` `/clear_history` `/version` `/about` `/uptime` |
 | **Agent identity** (1) | `/identity` — show/generate ed25519 keypair + did:key |
 | **BV-7X** (2) | `/bv7x` `/btc` |
-| **Clawnch premium** (3) | `/premium` `/verify` `/burn_and_call` — tier status, wallet verification, one-shot burn redemption |
 | **Meta** (2) | `/doctor` `/help` |
 
 A `pre_llm_call` hook injects the last 5 slash-command calls into LLM context, so the agent stops re-asking things you just answered via slash (`/balance` → "what's my balance?" → agent uses the cached result rather than re-fetching).
@@ -147,49 +146,6 @@ Clawmes wires the following partner / ecosystem projects directly into the tool 
 - **[EAS](https://attest.org) (Ethereum Attestation Service)** — generic on-chain attestation primitive on Base. The `eas_attestation` tool reads any attestation from the canonical EAS singleton (`0x4200…0021`) — BV-7X predictions are one example, but the tool also works for trust-score certificates, KYC results, and any other EAS-using protocol. Configurable `chain_id` + `eas_address` for other L2s.
 
 - **A2A protocol** — generic agent-to-agent JSON-RPC 2.0 client (`a2a_call` tool). `discover` fetches a peer's AgentCard at `/.well-known/agent-card.json`; `send_task` posts JSON-RPC tasks. Works against any A2A-speaking peer; tested against BV-7X.
-
-## $CLAWNCH premium
-
-The full clawmes surface — every read tool, every write tool, every slash command — is open source and free. A small subset of features that clawmes operates server-side (managed RPC pools, OpenGateway high-tier inference quota, clawmes-issued EAS attestation writes, priority bridge routing, BV-7X passthrough) are gated by Clawnch premium.
-
-Premium is **stake-based**. Lock $CLAWNCH in the [`ClawnchStakeEscrow`](https://github.com/clawnchdev/clawnch/blob/master/contracts/src/clawncher/ClawnchStakeEscrow.sol) contract on Base, get tiered access plus a share of platform LP fees in WETH. One stake powers both yield and clawmes premium — see the [staking dashboard at clawn.ch/stake](https://clawn.ch/stake).
-
-| Tier | Weighted stake | What unlocks |
-|---|---|---|
-| **Free** | 0 | Everything in the table of tools above — read, write, swap, bridge, lend, stake, governance. The full agent. |
-| **Pro** | ≥ 10M | OpenGateway high-tier inference, premium RPC pool, BV-7X premium oracle passthrough, priority bridge routing |
-| **Max** | ≥ 50M | Everything in Pro + clawmes-issued EAS attestation writes, sub-agent / A2A capability, early-access tools |
-
-Weighted stake = `amount × tier_multiplier_bps / 100`. Bronze (30d lock) = 1x, Silver (90d) = 2x, Gold (180d) = 4x, Diamond (365d) = 8x. A 10M Diamond stake counts as 80M weighted (= Max tier).
-
-### Per-call burn (no stake required)
-
-Don't want to stake? Burn $CLAWNCH per call instead.
-
-```
-/premium                          → show current tier
-/premium features                 → list premium features + costs
-/premium quote bv7x_oracle_premium → get burn calldata + cost (e.g. 100,000 CLAWNCH)
-/burn_and_call <feature> <tx_hash> → redeem the burn for one-shot access
-```
-
-The burn goes to the canonical `0x...dead` address — every premium per-call burn is verifiable on-chain. Default per-call costs at the current ~$10.5M mcap baseline:
-
-| Feature | Cost | Tier shortcut |
-|---|---|---|
-| `bv7x_oracle_premium` | 100,000 CLAWNCH (~$10) | Pro |
-| `opengateway_high_tier` | 50,000 CLAWNCH (~$5) | Pro |
-| `eas_attestation_write` | 200,000 CLAWNCH (~$20) | Max |
-| `premium_rpc_hour` | 500,000 CLAWNCH (~$50) | Pro |
-| `premium_bridge_routing` | 50,000 CLAWNCH (~$5) | Pro |
-
-Override per-feature pricing with `CLAWNCH_BURN_PRICE_<FEATURE_ID>` env vars; override tier thresholds with `CLAWNCH_PREMIUM_PRO_THRESHOLD` and `CLAWNCH_PREMIUM_MAX_THRESHOLD`.
-
-### How the gate works
-
-Premium is enforced at the **server**, not in the open source client. Anyone can fork clawmes and remove the gate — the gate only protects access to things clawmes operates (the OpenGateway endpoint, the EAS issuer, the BV-7X passthrough). Forks lose the server, not the feature category. Run your own gateway, your own EAS issuer, your own RPC pool, and you don't need premium at all.
-
-This matches how every honest gated-token project works (BV-7X gates premium oracle endpoints behind `$BV7X` holdings, dYdX gates fee rebates behind `$DYDX` stake, etc).
 
 ## Security
 
