@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-50 tools. 71 commands. 21 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 73 commands. 21 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -104,6 +104,22 @@ The compound action engine lets users describe multi-step plans in natural langu
 
 Plans persist to disk and survive restarts. Managed via `/plans`, `/interrupt_plan`. The plan tick loop is driven by Hermes' built-in cron daemon.
 
+## Ecosystem integrations
+
+Clawmes wires the following partner / ecosystem projects directly into the tool + slash-command surface:
+
+- **[BV-7X](https://bv7x.ai)** — autonomous BTC signal oracle launched on the Clawnch launchpad two days after the launchpad went live. Daily on-chain predictions via EAS attestations on Base; ~60% live accuracy; real Polymarket wager bot. Clawmes wires the full public + auth-gated surface:
+  - Slash: `/btc` (price + Fear & Greed + ETF flow in one line), `/bv7x` (track record + market regime + agent identity).
+  - Tools: `bv7x` (agent + A2A + commerce), `bv7x_oracle` (signals + on-chain attestations + premium endpoints), `bv7x_market` (BTC market data).
+  - Skill bundle: `clawmes:bv7x` documents the LLM-facing surface.
+  - Premium endpoints (`oracle`, `oracle_premium`, `copy_trade_next`, `copy_trade_history`) require `BV7X_API_KEY` — hold ≥500M `$BV7X` and complete the wallet-verify at <https://bv7x.ai/terminal#developer>.
+
+- **[gitlawb OpenGateway](https://gitlawb.com/opengateway)** — OpenAI-compatible LLM inference gateway. Routes Xiaomi MiMo, GMI Cloud, and more behind one endpoint, server-side secrets. Two integration modes: (1) point Hermes itself at OpenGateway via `hermes model` (config-only, no clawmes code change) — every LLM call the agent makes routes through it; (2) clawmes tools can call OpenGateway directly via `OpenGatewayService.chat_completion()` for targeted subtasks outside the main agent loop.
+
+- **[EAS](https://attest.org) (Ethereum Attestation Service)** — generic on-chain attestation primitive on Base. The `eas_attestation` tool reads any attestation from the canonical EAS singleton (`0x4200…0021`) — BV-7X predictions are one example, but the tool also works for trust-score certificates, KYC results, and any other EAS-using protocol. Configurable `chain_id` + `eas_address` for other L2s.
+
+- **A2A protocol** — generic agent-to-agent JSON-RPC 2.0 client (`a2a_call` tool). `discover` fetches a peer's AgentCard at `/.well-known/agent-card.json`; `send_task` posts JSON-RPC tasks. Works against any A2A-speaking peer; tested against BV-7X.
+
 ## Security
 
 - WalletConnect mode: clawmes never holds unencrypted private keys.
@@ -136,10 +152,10 @@ hermes clawmes uninstall         Remove from plugins.enabled (state preserved)
 hermes (the upstream CLI, hermes-agent ≥ 2026.4.x)
   └── PluginManager.discover_and_load()
         └── clawmes.register(ctx)
-              ├── 50 tools     (registered via ctx.register_tool, write-gated)
-              ├── 71 commands  (registered via ctx.register_command)
+              ├── 52 tools     (registered via ctx.register_tool, write-gated)
+              ├── 73 commands  (registered via ctx.register_command)
               ├── 11 hooks     (pre_tool_call, post_tool_call, pre_llm_call, ...)
-              ├── 27 skills    (registered via ctx.register_skill, namespaced clawmes:*)
+              ├── 28 skills    (registered via ctx.register_skill, namespaced clawmes:*)
               ├── CLI subcmds  (registered via ctx.register_cli_command)
               └── 21 services  (start_all() starts background lifecycle)
                     │

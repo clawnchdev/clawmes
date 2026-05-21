@@ -192,6 +192,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`0x4200…0021`); overridable via `eas_address` for other L2s.
 - `bv7x.ai` added to `clawmes/lib/http.py` allowlist.
 
+### Added — BV-7X full ecosystem integration
+
+BV-7X is a clawnch-ecosystem project (`$BV7X` launched on the
+Clawnch launchpad). This PR layers a full integration on top of
+the initial agent-economy scaffold above:
+
+- **`BV7XService` extended** with every public + (auth'd) gated
+  endpoint: market data (`btc_price`, `fear_greed`, `etf_flows`,
+  `regime`, `signal_metadata`), track record (`scorecard`), on-chain
+  attestation oracle (`onchain_latest/history/stats/verify`), agent
+  + A2A + commerce (`identity`, `reputation`, `discover`,
+  `get_a2a_task`, `commerce_offerings`, `copy_trade_status`), and
+  token-gated premium (`oracle`, `oracle_premium`, `copy_trade_next`,
+  `copy_trade_history`). Auth = `BV7X_API_KEY` env var, forwarded as
+  `Authorization: Bearer …` after the wallet-verify flow at
+  bv7x.ai.
+- **`bv7x` tool** (extended) — agent / A2A / commerce reads.
+- **`bv7x_oracle` tool** (new) — signal + on-chain attestation +
+  premium endpoints in one tool. 10 actions.
+- **`bv7x_market` tool** (new) — quick BTC reads (price, F&G, ETF).
+- **`/bv7x` slash command** — track record + regime + agent id one-shot.
+- **`/btc` slash command** — quick BTC price + F&G + ETF line.
+- **`clawmes:bv7x` skill bundle** — documents the full BV-7X surface
+  for the LLM (`clawmes/skills/bv7x/SKILL.md`).
+- **New env var**: `BV7X_API_KEY` (declared in both `plugin.yaml`
+  copies, marked `secret: true`, with URL pointing at the
+  wallet-verify page).
+
 ### Deferred
 
 - **ERC-8004 agent registry integration.** The spec is currently a
