@@ -62,7 +62,32 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Automation** (1) | `compound_action` | Multi-step plans (DCA, conditional triggers, loops) via plan scheduler |
 | **Agent ops** (4) | `molten`, `clawnx`, `hummingbot`, `wayfinder` | X/Twitter posting, agent-to-agent matching, local Hummingbot market-making gateway, multi-step route optimization |
 | **Memory** (3) | `agent_memory`, `skill_evolve`, `session_recall` | Hermes-backed persistent memory, agentic skill self-improvement, past-session search |
+| **Safety & identity** (2) | `policy_manage`, `agent_identity` | LLM-callable policy CRUD with propose→confirm flow, ed25519 keypair + did:key for verifiable agent identity |
+| **Agent economy** (5) | `bv7x`, `bv7x_oracle`, `bv7x_market`, `a2a_call`, `eas_attestation` | BV-7X autonomous BTC oracle (signals + on-chain attestations + premium endpoints), generic A2A JSON-RPC client, EAS attestation reader on Base |
 | **Misc** (5) | `giza`, `nookplot`, `paysponge`, `lobster_cash`, `_user_tools` | zkML inference, Farcaster analytics, fiat ramp, privacy pools, custom-tool dispatcher |
+
+## Commands
+
+73 slash commands across 14 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+
+| Category | Commands |
+|---|---|
+| **Wallet** (8) | `/wallet` `/connect` `/connect_local` `/connect_bankr` `/disconnect` `/mode` `/chain` `/address` |
+| **Wallet recovery** (4) | `/create_wallet` `/recover` `/export_wallet` `/wallet_backup` |
+| **Policy & safety** (5) | `/policy` `/policy_clear` `/safemode` `/dangermode` `/audit` |
+| **Transactions** (4) | `/tx` `/tx_search` `/tx_export` `/pending` |
+| **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
+| **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
+| **Balance & portfolio** (2) | `/balance` `/portfolio` |
+| **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
+| **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
+| **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
+| **Info** (5) | `/history` `/clear_history` `/version` `/about` `/uptime` |
+| **Agent identity** (1) | `/identity` — show/generate ed25519 keypair + did:key |
+| **BV-7X** (2) | `/bv7x` `/btc` |
+| **Meta** (2) | `/doctor` `/help` |
+
+A `pre_llm_call` hook injects the last 5 slash-command calls into LLM context, so the agent stops re-asking things you just answered via slash (`/balance` → "what's my balance?" → agent uses the cached result rather than re-fetching).
 
 ## Channels
 
@@ -83,7 +108,7 @@ All tools and commands work identically on every channel.
 | Mode | Key custody | How it works |
 |---|---|---|
 | **WalletConnect** | Your phone wallet | `/connect` generates a pairing link via the bundled Node WC bridge. Every write tx goes to your phone for approval. |
-| **Local key** | Local encrypted | BIP-39 mnemonic generated locally, encrypted with scrypt + AES-256-GCM, stored in macOS Keychain or encrypted file. |
+| **Local key** | Local encrypted | BIP-39 mnemonic generated locally, encrypted with scrypt + AES-256-GCM, stored in macOS Keychain or an encrypted file. Manage with `/create_wallet`, `/connect_local`, `/recover`, `/export_wallet`, `/wallet_backup`. |
 | **Bankr** | Custodial | `/connect_bankr` or `BANKR_API_KEY`. Multi-chain custodial wallet. Good for automation-heavy setups + leverage + Polymarket. |
 
 Spending policies set in natural language:
@@ -91,6 +116,8 @@ Spending policies set in natural language:
 ```
 /policy approve transfers under 0.05 ETH on Base, max 10/hour
 ```
+
+For programmatic policy management (the LLM can propose, you confirm), use the `policy_manage` tool — propose→confirm flow with `confirm_store` enforcement, plus list/get/disable/enable/delete/evaluate(dry-run)/usage/categories actions.
 
 ## Automation
 
@@ -128,8 +155,10 @@ Clawmes wires the following partner / ecosystem projects directly into the tool 
 - Prompt-injection-resistance guardrails in SOUL.md.
 - Sequential write execution — never queues multiple txs.
 - Bounded approvals — exact amounts, never unlimited.
-- Outbound HTTP restricted to a curated allowlist.
+- Outbound HTTP restricted to a curated default allowlist, with optional runtime session-scoped additions via `/allow <host>` (`/allowlist` shows defaults + user-added + last 100 blocked attempts).
 - Transaction verification — always shows what a tx will do before executing.
+- **Self-modification gate**: the agent's own memory (`agent_memory`) and skill files (`skill_evolve`) are write-gated through an explicit "evolution mode" — OFF by default. `/evolve` enables, `/stable` disables, `/evolution` shows status. Closes the prompt-injection drift vector where an attacker could rewrite the agent's own context.
+- **Verifiable agent identity**: each agent has an ed25519 keypair + `did:key` encoding, independent from the wallet. Use the wallet key for on-chain transactions; use the DID key for protocol messages (MCP calls, capability delegations, attestation signatures). `/identity` to show/generate.
 
 ## CLI subcommands
 
