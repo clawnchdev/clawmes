@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.2.0 — 2026-05-21
+
+Major release covering ten merged PRs plus the Clawnch launchpad
+integration. Summary across all v0.2.0 changes:
+
+- **+7 tools** (52 total): policy_manage, agent_identity, bv7x,
+  bv7x_oracle, bv7x_market, a2a_call, eas_attestation.
+  clawnch_launch + clawnch_fees rewritten against the live launchpad
+  HTTP API (previously dead-ended on an imaginary on-chain contract).
+- **+47 commands** (75 total): /policy + /policy_manage; /create_wallet,
+  /recover, /export_wallet, /wallet_backup, /connect_local; /welcome
+  + 5 personas + 10 capability toggles + /skip/back/reonboard;
+  /evolve, /stable, /evolution; /allowlist, /allow, /disallow;
+  /balance, /portfolio; /history, /clear_history, /version, /about,
+  /uptime; /skills, /persona, /chains, /tools_list, /safety_status;
+  /identity; /bv7x, /btc; /launch, /register_agent.
+- **+7 services** (22 total): OnboardingService, EvolutionModeService,
+  EndpointAllowlistService, CommandHistoryService, IdentityService,
+  BV7XService, ClawnchService.
+- **+1 hook**, **+1 skill** (clawmes:bv7x), and now
+  clawmes:clawnch-launch (+1 more, 29 total).
+- pre_llm_call hook now injects recent slash-command results as
+  agent context (command-history integration).
+- 1077 new tests; full suite 2677 passing at 100% coverage.
+
+See individual PR entries below for detail.
+
 ### Added — Clawnch launchpad integration (launch from chat)
 
 - **`ClawnchService`** (`clawmes/services/clawnch.py`) — HTTP client
