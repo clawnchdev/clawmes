@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- `policy_manage` tool (`clawmes/tools/policy_manage.py`) — LLM-callable
+  surface for the already-shipped `clawmes.policy` engine. Eleven
+  actions: `propose`, `confirm`, `revise`, `list`, `get`, `disable`,
+  `enable`, `delete`, `evaluate` (dry-run), `usage`, `categories`.
+  Propose -> confirm flow uses `confirm_store` to require explicit
+  user consent before any new policy lands on disk. Disabled policies
+  persist to a side-car at `${HERMES_HOME}/clawmes/policy/disabled_policies.json`
+  so they can be re-enabled later without rebuilding from scratch.
+  Decorated `@read_tool` (not `@write_tool`) to avoid policy-managing-itself
+  recursion; mutations still persist directly to disk. Closes one of
+  the OpenClawnch parity gaps without porting OC's richer policy
+  schema — args that don't map to clawmes' Policy IR
+  (allowlists, time-of-day windows, approval thresholds) are surfaced
+  via `not_implemented` rather than silently accepted.
+
 ### Documentation
 
 - README "Using OpenGateway as your LLM provider" section documents

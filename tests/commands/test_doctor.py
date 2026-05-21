@@ -166,8 +166,8 @@ class TestPluginSection:
     def test_real_manifest_counts(self):
         section = _plugin_section()
         assert "Tools registered:" in section.body
-        # Should report 45 from the real manifest
-        assert "45" in section.body
+        # Should report 46 from the real manifest (45 from 0.1.0 + policy_manage)
+        assert "46" in section.body
         assert "Hooks registered:" in section.body
         assert "11" in section.body  # 11 hooks
         assert "Commands registered:" in section.body
