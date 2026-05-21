@@ -138,6 +138,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/version`,
   `/about`,
   `/uptime`.
+- **`IdentityService`** (`clawmes/services/identity.py`) — ed25519
+  keypair + `did:key` encoding. Gives the agent a verifiable
+  cryptographic identity independent of the connected wallet. The
+  wallet signs on-chain transactions (high-value); the DID signs
+  protocol messages — MCP calls, capability delegations, code-review
+  signatures, anything where the wallet key is too sensitive for
+  the hot path.
+- **`agent_identity` tool** (`clawmes/tools/agent_identity.py`) —
+  LLM-callable surface with 5 actions: `show`, `create`, `sign`,
+  `verify` (static, no identity required), `did_encode` (raw pubkey
+  hex → `did:key:z...`).
+- **`/identity` slash command** (`clawmes/commands/identity.py`) —
+  no-arg shows the current identity, `create` generates a fresh
+  keypair, `create force` replaces an existing one.
+
+  v1 is in-memory only. Restart loses the keypair by design — the
+  persistence path (encrypted file mirroring the wallet keystore, or
+  deterministic derivation from the wallet mnemonic) lands in a
+  follow-up PR. Same posture as `persona_service` and `mode_service`.
+
+  Built on `pycryptodome`'s `Crypto.PublicKey.ECC` (Ed25519 curve) +
+  `Crypto.Signature.eddsa`. `did:key:z…` encoding via inline
+  base58btc (no new external dependency). DER-prefixed import path
+  for the public key (pycryptodome doesn't accept raw 32-byte
+  ed25519 keys directly).
 
 ### Documentation
 

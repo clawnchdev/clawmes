@@ -29,6 +29,7 @@ def register_all(ctx) -> None:
     """
     from clawmes.tools import (
         _user_tools,
+        agent_identity,
         agent_memory,
         airdrop,
         analytics,
@@ -117,6 +118,7 @@ def register_all(ctx) -> None:
         privacy,
         policy_manage,
         herd_intelligence,
+        agent_identity,
         agent_memory,
         skill_evolve,
         session_recall,

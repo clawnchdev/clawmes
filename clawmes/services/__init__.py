@@ -45,6 +45,7 @@ def start_all() -> None:
     from clawmes.services.endpoint_allowlist import get_endpoint_allowlist_service
     from clawmes.services.evolution_mode import get_evolution_mode_service
     from clawmes.services.explorer import get_explorer_service
+    from clawmes.services.identity import get_identity_service
     from clawmes.services.lifi import get_lifi_service
     from clawmes.services.mode_service import get_mode_service
     from clawmes.services.onboarding_service import get_onboarding_service
@@ -82,6 +83,10 @@ def start_all() -> None:
         #     that opt in via record_command_call(); read by pre_llm_call
         #     so the agent sees what the user just ran.
         get_command_history_service,
+        # 2e. Identity service — holds the agent's ed25519 keypair +
+        #     did:key encoding. In-memory only in v1; persistence is
+        #     follow-up work mirroring the wallet keystore.
+        get_identity_service,
         # 3. RPC client — read-side foundation; many other services
         #    (token_decimals, wallet, balance tools) depend on it.
         get_rpc_service,
