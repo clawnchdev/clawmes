@@ -165,25 +165,28 @@ class TestHandleBtc:
 
 
 class TestRecord:
-    async def test_record_swallows_missing_module(self, monkeypatch):
-        # Force the import to fail.
-        import sys
+    async def test_record_swallows_failure(self, monkeypatch):
+        # When record_command_call raises, _record must swallow it
+        # (covers the bare ``except: pass`` branch).
+        from clawmes.services import command_history as ch_mod
 
-        for name in list(sys.modules):
-            if name == "clawmes.services.command_history":
-                del sys.modules[name]
+        def _boom(*a, **kw):
+            raise RuntimeError("simulated record failure")
+
+        monkeypatch.setattr(ch_mod, "record_command_call", _boom)
         # No assertion needed — just verify _record doesn't raise.
         bv7x_cmd._record("test", "args", "result")
 
     async def test_record_when_present(self, monkeypatch):
-        # Inject a fake command_history module to cover the success path.
-        import sys
-        import types
+        # Cover the happy path: real command_history with our fake recorder.
+        from clawmes.services import command_history as ch_mod
 
-        captured = []
-        fake_mod = types.ModuleType("clawmes.services.command_history")
-        fake_mod.record_command_call = lambda n, a, r: captured.append((n, a, r))  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "clawmes.services.command_history", fake_mod)
+        captured: list[tuple[str, str, str]] = []
+        monkeypatch.setattr(
+            ch_mod,
+            "record_command_call",
+            lambda n, a, r: captured.append((n, a, r)),
+        )
         bv7x_cmd._record("x", "y", "z")
         assert captured == [("x", "y", "z")]
 
