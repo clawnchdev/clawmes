@@ -230,8 +230,33 @@ class TestHandleDoctor:
             "API KEYS",
             "WALLETCONNECT BRIDGE",
             "PLUGIN MANIFEST",
+            "CLAWNCH PREMIUM",
         ):
             assert header in out
+
+
+class TestPremiumSection:
+    def test_premium_section_includes_tier(self):
+        from clawmes.commands.doctor import _premium_section
+
+        sec = _premium_section()
+        assert sec.title == "CLAWNCH PREMIUM"
+        assert "Active tier" in sec.body
+        assert "Pro threshold" in sec.body
+        assert "Max threshold" in sec.body
+        assert "Verifier" in sec.body
+
+    def test_premium_section_fallback_when_service_unavailable(self, monkeypatch):
+        from clawmes.commands import doctor as dmod
+        from clawmes.services import clawnch_premium as cp_mod
+
+        def _explode():
+            raise RuntimeError("singleton borked")
+
+        monkeypatch.setattr(cp_mod, "get_clawnch_premium_service", _explode)
+        sec = dmod._premium_section()
+        assert sec.title == "CLAWNCH PREMIUM"
+        assert "not available" in sec.body
 
     @pytest.mark.asyncio
     async def test_ignores_args(self):

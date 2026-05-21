@@ -24,6 +24,7 @@ from clawmes.commands import (
     onboarding,
     plans,
     policy,
+    premium,
     tx,
     wallet,
     wallet_recovery,
@@ -55,6 +56,7 @@ def register_all(ctx) -> None:
     info.register(ctx)
     identity.register(ctx)
     bv7x_cmd.register(ctx)
+    premium.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel

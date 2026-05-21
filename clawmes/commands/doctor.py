@@ -303,8 +303,38 @@ async def handle_doctor(raw_args: str) -> str:
         _api_keys_section(),
         _bridge_section(),
         _plugin_section(),
+        _premium_section(),
     ]
     return _render(sections)
+
+
+def _premium_section() -> _Section:
+    """Surface the active wallet's Clawnch premium tier + thresholds.
+
+    Reads the singleton premium service; if it isn't started yet (rare
+    — happens when ``handle_doctor`` runs before ``start_all``), falls
+    back to a placeholder rather than raising.
+    """
+    try:
+        from clawmes.lib import clawnch as clawnch_const
+        from clawmes.services.clawnch_premium import get_clawnch_premium_service
+
+        svc = get_clawnch_premium_service()
+        tier = svc.get_tier()
+        rows = [
+            ("Active tier", tier.upper()),
+            ("Pro threshold", f"{clawnch_const.PRO_THRESHOLD:,} CLAWNCH weighted"),
+            ("Max threshold", f"{clawnch_const.MAX_THRESHOLD:,} CLAWNCH weighted"),
+            (
+                "Escrow",
+                clawnch_const.ESCROW_ADDRESS or "(not yet deployed — using balance fallback)",
+            ),
+            ("Verifier", clawnch_const.VERIFIER_URL),
+        ]
+        body = "\n".join(f"  {k:<16} {v}" for k, v in rows)
+    except Exception:  # noqa: BLE001 — best-effort
+        body = "  (premium service not available)"
+    return _Section("CLAWNCH PREMIUM", body)
 
 
 def register(ctx) -> None:
