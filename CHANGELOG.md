@@ -22,6 +22,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   schema — args that don't map to clawmes' Policy IR
   (allowlists, time-of-day windows, approval thresholds) are surfaced
   via `not_implemented` rather than silently accepted.
+- 5 wallet recovery / backup slash commands plus the
+  prerequisite `WalletService.connect_local_key()` service method
+  (`clawmes/services/wallet.py`). Surface:
+    - `/connect_local <password>` — load the existing encrypted
+      keystore. Was referenced in help text since 0.1.0 but never
+      registered as a command; this PR closes the gap.
+    - `/create_wallet <password>` — generate a fresh BIP-39 24-word
+      mnemonic + encrypted keystore. Refuses to overwrite an existing
+      keystore (asks the user to back up first).
+    - `/recover <password> | <mnemonic>` — two-phase mnemonic import.
+      Phase 1 (no args) shows usage; phase 2 validates word count
+      (12 or 24, BIP-39 standard) and persists.
+    - `/export_wallet <password>` — decrypt + display the active
+      keystore's mnemonic. Two-phase like `/recover`. Surfaces a
+      "DO NOT SHARE" warning inline.
+    - `/wallet_backup [output_path]` — copy `keystore.bin` to a
+      timestamped backup file. Accepts an explicit file path or
+      directory; default lands the backup next to the source.
+
+  Sensitive operations require the password as an inline arg
+  (mirrors OpenClawnch's wallet-manage-commands.ts). Slash commands
+  don't go through the `@write_tool` policy gate (no clawmes
+  infrastructure for that today); the password barrier is the
+  safety boundary. Commit message + module docstring spell this out.
 
 ### Documentation
 

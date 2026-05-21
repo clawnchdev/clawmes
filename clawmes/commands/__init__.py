@@ -19,6 +19,7 @@ from clawmes.commands import (
     policy,
     tx,
     wallet,
+    wallet_recovery,
 )
 from clawmes.commands import (
     help as help_cmd,
@@ -31,6 +32,7 @@ def register_all(ctx) -> None:
     """Register every clawmes slash command with Hermes."""
     help_cmd.register(ctx)
     wallet.register(ctx)
+    wallet_recovery.register(ctx)
     policy.register(ctx)
     tx.register(ctx)
     plans.register(ctx)

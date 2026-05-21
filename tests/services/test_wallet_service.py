@@ -193,6 +193,60 @@ class TestConnectWalletConnect:
         fake_client.start.assert_called_once_with()
 
 
+class TestConnectLocalKey:
+    """Coverage for WalletService.connect_local_key — the slash
+    surface (/connect_local, /create_wallet, /recover) all funnel
+    through here."""
+
+    _TEST_MNEMONIC = (
+        "abandon abandon abandon abandon abandon abandon "
+        "abandon abandon abandon abandon abandon about"
+    )
+
+    def test_generate_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        svc = WalletService()
+        state = svc.connect_local_key("hunter2", generate=True)
+        assert state.connected is True
+        assert state.mode == "local"
+        assert state.address is not None
+        # Mnemonic is surfaced via the one-time-display side channel.
+        assert state.balances.get("_mnemonic")
+
+    def test_import_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        svc = WalletService()
+        state = svc.connect_local_key("hunter2", mnemonic=self._TEST_MNEMONIC)
+        assert state.connected is True
+        assert state.mode == "local"
+        assert state.address is not None
+
+    def test_load_after_persist(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        # First create a keystore.
+        svc = WalletService()
+        svc.connect_local_key("hunter2", mnemonic=self._TEST_MNEMONIC)
+        expected_address = svc.state.address
+
+        # Disconnect and reload via a fresh service.
+        svc.disconnect()
+        svc2 = WalletService()
+        state = svc2.connect_local_key("hunter2")
+        assert state.address == expected_address
+
+    def test_wrong_password_on_load_raises(self, monkeypatch, tmp_path):
+        from clawmes.wallet.keystore import KeystoreError
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        svc = WalletService()
+        svc.connect_local_key("hunter2", mnemonic=self._TEST_MNEMONIC)
+        svc.disconnect()
+
+        svc2 = WalletService()
+        with pytest.raises(KeystoreError):
+            svc2.connect_local_key("wrong-password")
+
+
 class TestSwitchChain:
     def test_no_mode_raises_config_error(self):
         from clawmes.services.wallet import WalletConfigError
