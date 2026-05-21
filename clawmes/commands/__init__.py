@@ -19,6 +19,7 @@ from clawmes.commands import (
     discovery,
     doctor,
     evolve,
+    info,
     onboarding,
     plans,
     policy,
@@ -47,6 +48,7 @@ def register_all(ctx) -> None:
     allowlist.register(ctx)
     balance.register(ctx)
     evolve.register(ctx)
+    info.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel

@@ -117,6 +117,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   list). Both pick up the wallet address + chain from
   `wallet_service`; both are pure surface deltas over an existing
   read-only tool.
+- **Command-history service** (`clawmes/services/command_history.py`) —
+  ring buffer of recent slash-command calls + result summaries.
+  Recorded explicitly by handlers that opt in via
+  `record_command_call(name, args, result)`; sensitive commands
+  (`/export_wallet`, `/recover`) deliberately don't record so
+  mnemonics don't surface in a recap. Default ring 20 entries; result
+  summaries truncated to 240 chars to keep prompt-cache impact
+  bounded.
+- **`pre_llm_call` hook integration** — `prompt_builder._append_command_history`
+  reads the recent ring and injects the last 5 entries as
+  `[clawmes/recent-commands]` into the per-turn user message context.
+  Net effect: the agent stops re-asking things the user just answered
+  via slash (e.g. user runs `/balance`, then "what's my balance?" —
+  the agent now sees the previous result and replies without
+  re-fetching).
+- 5 new info / status commands (`clawmes/commands/info.py`):
+  `/history [N]` (show recent recap, default 10, max 20),
+  `/clear_history` (wipe the ring),
+  `/version`,
+  `/about`,
+  `/uptime`.
 
 ### Documentation
 
