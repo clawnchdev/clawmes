@@ -96,10 +96,6 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         # support in tools.a2a_call. bv7x.ai exposes a JSON-RPC 2.0 A2A
         # endpoint as well as a public REST oracle.
         "bv7x.ai",
-        # Clawnch premium verifier — issues short-lived JWTs after
-        # wallet-signed challenges, verifies on-chain burn txs for
-        # per-call one-shot grants. See services.clawnch_premium.
-        "clawn.ch",
         # Simulation
         "api.tenderly.co",
         # Fiat ramps

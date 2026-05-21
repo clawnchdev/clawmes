@@ -6,52 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
-### Added — Clawnch premium tier ($CLAWNCH integration)
-
-- **`ClawnchPremiumService`** (`clawmes/services/clawnch_premium.py`) —
-  resolves the active wallet's premium tier from on-chain state. Reads
-  `$CLAWNCH` balance + (when deployed) stakes held in
-  `ClawnchStakeEscrow`, sums weighted stake (`amount × multiplierBps /
-  100`), compares to `PRO_THRESHOLD` / `MAX_THRESHOLD`. Cache TTL 60s
-  on tier lookups; per-wallet JWT cache (default 24h TTL); per-feature
-  one-shot grants for burn-and-call. The escrow address is `None`
-  until the contract goes live on Base mainnet — until then the
-  service degrades gracefully to a balance-only check.
-- **`@premium_feature` decorator + `gate()` helper** (`clawmes/lib/premium.py`)
-  — wraps a tool/command so the gate runs before the underlying
-  callable. On grant: pass-through. On denial: structured
-  `premium_required` envelope with both unlock paths (stake at
-  clawn.ch, or one-shot burn). `gate()` is the inline variant for
-  tools that dispatch multiple sub-actions where only some are
-  premium-gated.
-- **3 new slash commands** (`clawmes/commands/premium.py`):
-    - `/premium` — show current tier; `/premium features` lists every
-      premium feature; `/premium quote <feature_id>` returns burn
-      calldata + cost (pre-built `transfer(0xdead, amount)`).
-    - `/verify <address>:<signature>` — POST signed challenge to the
-      clawn.ch verifier, cache the returned JWT (lifts the gate for
-      the JWT's TTL).
-    - `/burn_and_call <feature_id> <tx_hash>` — after signing a burn
-      tx, redeem the hash for one-shot premium access to the named
-      feature.
-- **`OpenGatewayService.chat_completion_premium()`** — new method that
-  gates the existing `chat_completion` behind the premium tier.
-  Demonstrates the gate end-to-end against a real server-backed
-  resource. Free `chat_completion()` stays unchanged — premium callers
-  opt in explicitly via the new method.
-- **`/doctor` Clawnch premium section** — surfaces active tier,
-  configured thresholds, escrow deployment status, verifier URL.
-- **Feature catalog** in `clawmes/lib/clawnch.py`: 5 starter features
-  (`bv7x_oracle_premium`, `opengateway_high_tier`,
-  `eas_attestation_write`, `premium_rpc_hour`,
-  `premium_bridge_routing`) with default per-call burn prices tuned
-  for the ~$10.5M mcap baseline. Operators override per-feature via
-  `CLAWNCH_BURN_PRICE_<FEATURE_ID>` env vars; override tier
-  thresholds via `CLAWNCH_PREMIUM_PRO_THRESHOLD` /
-  `CLAWNCH_PREMIUM_MAX_THRESHOLD`.
-- **`clawn.ch` added to `clawmes/lib/http.py` allowlist** so the
-  premium service can reach the verifier endpoints.
-
 ### Added
 
 - `policy_manage` tool (`clawmes/tools/policy_manage.py`) — LLM-callable

@@ -590,37 +590,3 @@ class TestSingleton:
         a = get_opengateway_service()
         b = get_opengateway_service()
         assert a is b
-
-
-class TestChatCompletionPremium:
-    """chat_completion_premium gates on the Clawnch premium tier."""
-
-    def test_denies_when_no_premium(self, svc, monkeypatch):
-        from clawmes.services import clawnch_premium as cp_mod
-
-        class _FakeSvc:
-            def has_access(self, feature_id):
-                return False
-
-        monkeypatch.setattr(cp_mod, "_instance", None)
-        monkeypatch.setattr(cp_mod, "get_clawnch_premium_service", lambda: _FakeSvc())
-        out = svc.chat_completion_premium([{"role": "user", "content": "hi"}])
-        assert out["isError"] is True
-        assert "details" in out
-        assert out["details"]["feature"] == "opengateway_high_tier"
-
-    def test_grants_when_premium(self, svc, monkeypatch, fake_http):
-        from clawmes.services import clawnch_premium as cp_mod
-
-        class _FakeSvc:
-            def has_access(self, feature_id):
-                return True
-
-        monkeypatch.setattr(cp_mod, "_instance", None)
-        monkeypatch.setattr(cp_mod, "get_clawnch_premium_service", lambda: _FakeSvc())
-        fake_http.responses.append({"choices": [{"message": {"content": "ok"}}]})
-        out = svc.chat_completion_premium(
-            [{"role": "user", "content": "hi"}],
-            model="some-premium-model",
-        )
-        assert out["choices"][0]["message"]["content"] == "ok"

@@ -40,7 +40,6 @@ def start_all() -> None:
     from clawmes.plans.scheduler import get_scheduler
     from clawmes.services.bankr_service import get_bankr_service
     from clawmes.services.bv7x import get_bv7x_service
-    from clawmes.services.clawnch_premium import get_clawnch_premium_service
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.command_history import get_command_history_service
     from clawmes.services.credential_redactor import get_credential_redactor
@@ -89,11 +88,6 @@ def start_all() -> None:
         #     did:key encoding. In-memory only in v1; persistence is
         #     follow-up work mirroring the wallet keystore.
         get_identity_service,
-        # 2f. Clawnch premium gate — reads $CLAWNCH balance + (when
-        #     deployed) ClawnchStakeEscrow stakes for the active wallet
-        #     to resolve premium tier. Read by @premium_feature
-        #     decorator before serving premium ops.
-        get_clawnch_premium_service,
         # 3. RPC client — read-side foundation; many other services
         #    (token_decimals, wallet, balance tools) depend on it.
         get_rpc_service,

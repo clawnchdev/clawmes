@@ -181,38 +181,6 @@ class OpenGatewayService(Service):
 
         return self._call("/chat/completions", body, api_key=api_key, timeout=timeout)
 
-    def chat_completion_premium(
-        self,
-        messages: list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """High-tier chat completion — gated on Clawnch premium.
-
-        Identical contract to :meth:`chat_completion` but adds the
-        Clawnch premium gate (``opengateway_high_tier`` feature). Free
-        tier callers see a structured ``premium_required`` response.
-
-        Why a separate method instead of a flag on ``chat_completion``:
-        keeps the free path completely free of premium-gate cost —
-        no service round-trip when a free-tier tool uses the gateway
-        for normal inference. Premium callers opt in explicitly.
-
-        Returns the same OpenAI chat-completion envelope on grant. On
-        denial, returns the gate denial dict (with ``isError``,
-        ``content``, ``details``) — tools should treat it as an error
-        path, not a normal response.
-        """
-        from clawmes.lib.premium import gate
-
-        denial = gate("opengateway_high_tier", tool_shape=False)
-        if denial is not None:
-            return {
-                "isError": True,
-                "content": [{"type": "text", "text": denial}],
-                "details": {"premium_required": True, "feature": "opengateway_high_tier"},
-            }
-        return self.chat_completion(messages, **kwargs)
-
     def _call(
         self,
         path: str,
