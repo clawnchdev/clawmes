@@ -61,6 +61,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - `/safety_status` — show current `mode_service` mode (normal /
       readonly / danger) with context on what each mode means for
       write tools.
+- 19 onboarding slash commands (`clawmes/commands/onboarding.py`) plus
+  the backing `OnboardingService`
+  (`clawmes/services/onboarding_service.py`). Surface:
+    - `/welcome` — show current step, persona, and capability picks.
+    - 5 persona switches — `/professional`, `/degen`, `/chill`,
+      `/technical`, `/mentor`. Each delegates to `persona_service` and
+      advances the onboarding step from `welcome` / `pick_persona` to
+      `pick_wallet`.
+    - 10 capability toggles — `/cap_wallet`, `/cap_prices`,
+      `/cap_portfolio`, `/cap_trading`, `/cap_liquidity`,
+      `/cap_launchpad`, `/cap_bridge`, `/cap_routing`, `/cap_clawnx`,
+      `/cap_hummingbot`. No arg = flip current state; `on`/`off`/`true`/
+      `false`/`enable`/`disable`/`yes`/`no`/`y`/`n`/`1`/`0` set
+      explicit state.
+    - 3 flow controls — `/skip` (advance), `/back` (pop step history),
+      `/reonboard` (reset state + clear persona).
+  The `OnboardingService` is in-memory only (matches
+  `persona_service`), keyed by `sender_id` with `"default"` for the
+  single-user CLI case. Step history is a per-sender stack;
+  capabilities are a per-sender set. Capability picks are *recorded*
+  today, not enforced — a future PR will wire enforcement (suppress
+  tool registrations on a per-sender basis) into the
+  `clawmes/tools/__init__.py` register loop.
 
 ### Documentation
 

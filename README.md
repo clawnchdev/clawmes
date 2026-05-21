@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-46 tools. 38 commands. 15 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+46 tools. 57 commands. 16 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -137,11 +137,11 @@ hermes (the upstream CLI, hermes-agent ≥ 2026.4.x)
   └── PluginManager.discover_and_load()
         └── clawmes.register(ctx)
               ├── 46 tools     (registered via ctx.register_tool, write-gated)
-              ├── 38 commands  (registered via ctx.register_command)
+              ├── 57 commands  (registered via ctx.register_command)
               ├── 11 hooks     (pre_tool_call, post_tool_call, pre_llm_call, ...)
               ├── 27 skills    (registered via ctx.register_skill, namespaced clawmes:*)
               ├── CLI subcmds  (registered via ctx.register_cli_command)
-              └── 15 services  (start_all() starts background lifecycle)
+              └── 16 services  (start_all() starts background lifecycle)
                     │
                     ├── subprocess: clawmes-wc-bridge   (Node — WalletConnect v2)
                     └── subprocess: clawmes-sa-bridge   (Node — MetaMask Smart Accounts; planned)
