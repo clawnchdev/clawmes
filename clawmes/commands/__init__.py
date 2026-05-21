@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from clawmes.commands import (
     allowlist,
+    balance,
     discovery,
     doctor,
+    evolve,
     onboarding,
     plans,
     policy,
@@ -43,6 +45,8 @@ def register_all(ctx) -> None:
     discovery.register(ctx)
     onboarding.register(ctx)
     allowlist.register(ctx)
+    balance.register(ctx)
+    evolve.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel

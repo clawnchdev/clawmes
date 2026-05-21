@@ -42,6 +42,7 @@ def start_all() -> None:
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.credential_redactor import get_credential_redactor
     from clawmes.services.endpoint_allowlist import get_endpoint_allowlist_service
+    from clawmes.services.evolution_mode import get_evolution_mode_service
     from clawmes.services.explorer import get_explorer_service
     from clawmes.services.lifi import get_lifi_service
     from clawmes.services.mode_service import get_mode_service
@@ -73,6 +74,9 @@ def start_all() -> None:
         #     picks, and step history for /skip and /back. Pure in-memory;
         #     persisted-to-disk variant is future work.
         get_onboarding_service,
+        # 2c. Evolution-mode gate — read by agent_memory / skill_evolve
+        #     write actions. Default disabled; user opts in via /evolve.
+        get_evolution_mode_service,
         # 3. RPC client — read-side foundation; many other services
         #    (token_decimals, wallet, balance tools) depend on it.
         get_rpc_service,

@@ -82,6 +82,17 @@ _SCHEMA: dict[str, Any] = {
 )
 def skill_evolve(args: dict[str, Any], **kwargs: Any) -> str:
     action = read_str(args, "action", required=True)
+    if action in ("propose", "update", "revert"):
+        from clawmes.services.evolution_mode import is_evolving
+
+        if not is_evolving():
+            return error_result(
+                "Evolution mode is disabled. skill_evolve write actions "
+                "(propose / update / revert) require /evolve. Use "
+                "/evolution to check status; the safe default is OFF so "
+                "a prompt-injected LLM can't silently rewrite your skills.",
+                code="evolution_gate",
+            )
     base = _evolution_dir()
 
     if action == "list":
