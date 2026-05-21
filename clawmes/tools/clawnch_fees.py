@@ -1,47 +1,44 @@
-"""``clawnch_fees`` — claim Uniswap V4 LP fees from Clawnch launches.
+"""``clawnch_fees`` — read LP fee accrual for Clawnch launches.
 
-Three actions:
+Reads-side companion to ``clawnch_launch``. Two actions:
 
-  * ``claim``    — call the launchpad's claim(token) to collect
-    accumulated fees.
-  * ``summary``  — read pending unclaimed fees per launched token.
-  * ``history``  — read past fee claims (via block_explorer logs).
+  * ``my_launches`` — list the authenticated agent's launches with
+    aggregate fee accrual. Uses Clawnch's ``/api/agents/me`` endpoint.
+  * ``launch_info`` — per-token launch detail (price, volume, fees so
+    far). Uses Clawnch's ``/api/launches?address=…`` endpoint.
 
-Like ``clawnch_launch``, these need the launchpad ABI which isn't
-fully wired. Calldata-override path is exposed for advanced use.
+Claim-side ops aren't implemented here today: Clanker pays creator
+rewards via its own LP-fee accumulator (FeeLocker), not via a
+launchpad-controlled "claim()" function. Users claim through their
+Clanker dashboard or directly against the FeeLocker contract. Once
+v2 ships (the ClawnchFactory fork that drops Clanker), we'll revisit
+adding a launchpad-orchestrated claim action.
+
+Requires ``CLAWNCH_API_KEY`` for ``my_launches``; ``launch_info`` is
+public and works without a key.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from clawmes.lib.logger import logger_for
 from clawmes.lib.params import read_str
 from clawmes.lib.tool_result import error_result, json_result
-from clawmes.services.wallet import get_wallet_state
 from clawmes.tools.registry import register_with_ctx, write_tool
 
 _log = logger_for("tools.clawnch_fees")
-
-# Same as clawnch_launch — the launchpad address must be supplied via
-# env. Fail-loud rather than send a tx to a placeholder contract.
-_FEE_CLAIM_GAS_DEFAULT = 250_000
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["claim", "summary", "history"],
+            "enum": ["my_launches", "launch_info"],
         },
         "token": {
             "type": "string",
-            "description": "Launched token address.",
-        },
-        "calldata": {
-            "type": "string",
-            "description": "Override calldata for claim.",
+            "description": "Token address (for launch_info).",
         },
         "policyConfirmationNonce": {
             "type": "string",
@@ -56,69 +53,46 @@ _SCHEMA: dict[str, Any] = {
     name="clawnch_fees",
     toolset="clawmes-defi",
     description=(
-        "Claim Uniswap V4 LP fees from Clawnch launches. claim "
-        "collects pending fees; summary shows unclaimed amounts; "
-        "history reads past claims via block_explorer."
+        "Read LP-fee accrual + launch metadata for tokens deployed via "
+        "the Clawnch launchpad. my_launches lists the active agent's "
+        "launches; launch_info reads detail for a single token."
     ),
     schema=_SCHEMA,
     emoji="\U0001f4b0",
 )
 def clawnch_fees(args: dict[str, Any], **kwargs: Any) -> str:
-    state = get_wallet_state()
-    if not state.connected or not state.address:
-        return error_result(
-            "No wallet connected. Run /connect first.",
-            code="wallet_not_connected",
-        )
+    from clawmes.services.clawnch import ClawnchError, get_clawnch_service
 
     action = read_str(args, "action", required=True)
+    svc = get_clawnch_service()
 
-    if action in ("summary", "history"):
-        return error_result(
-            f"clawnch_fees {action} requires the launchpad ABI and "
-            "an indexer that aren't wired yet. Use block_explorer to "
-            "inspect the launchpad contract directly.",
-            code="not_implemented",
-        )
-
-    calldata = read_str(args, "calldata")
-    if not calldata:
-        return error_result(
-            "claim requires an explicit 'calldata' override — Clawnch ABI not wired yet.",
-            code="not_implemented",
-        )
-
-    from clawmes.services.wallet import get_wallet_service
-
-    launchpad = os.environ.get("CLAWNCH_LAUNCHPAD_ADDRESS")
-    if not launchpad:
-        return error_result(
-            "CLAWNCH_LAUNCHPAD_ADDRESS is not set. The Clawnch "
-            "launchpad address must be configured before fees can be "
-            "claimed. See the project README for configuration.",
-            code="not_configured",
-        )
-    svc = get_wallet_service()
-    mode = svc.active_mode
-    if mode is None:
-        return error_result(
-            "No active wallet mode; reconnect via /connect.",
-            code="wallet_not_connected",
-        )
     try:
-        tx_hash = mode.send_transaction(
-            to=launchpad,
-            value=0,
-            data=calldata,
-            gas=_FEE_CLAIM_GAS_DEFAULT,
-            chain_id=8453,
-        )
+        if action == "my_launches":
+            data = svc.get_my_launches()
+            return json_result(data, summary=_format_my_launches(data))
+        # action == "launch_info"
+        token = read_str(args, "token")
+        if not token:
+            return error_result(
+                "launch_info requires 'token' (address).",
+                code="param_error",
+            )
+        data = svc.get_launch(token)
+        return json_result(data, summary=f"Launch detail for {token}")
+    except ClawnchError as exc:
+        return error_result(exc.message, code=exc.code)
     except Exception as exc:  # noqa: BLE001
-        return error_result(f"Fee claim failed: {exc}", code="send_failed")
-    return json_result(
-        {"tx_hash": tx_hash},
-        summary=f"Clawnch fee claim submitted: {tx_hash}",
-    )
+        return error_result(f"Read failed: {exc}", code="api_error")
+
+
+def _format_my_launches(data: dict[str, Any]) -> str:
+    launches = data.get("launches") or data.get("tokens") or []
+    if not isinstance(launches, list):
+        return "My launches retrieved."
+    count = len(launches)
+    if count == 0:
+        return "No launches yet for this agent."
+    return f"{count} launch(es) recorded for this agent."
 
 
 def register(ctx) -> None:

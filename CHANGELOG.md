@@ -6,6 +6,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added — Clawnch launchpad integration (launch from chat)
+
+- **`ClawnchService`** (`clawmes/services/clawnch.py`) — HTTP client
+  for the Clawnch launchpad API (`https://clawn.ch/api`). Covers agent
+  registration (register / verify), the two-phase deploy flow
+  (challenge → solve captcha → confirm), and read endpoints
+  (`/api/agents/me`, `/api/launches`). Includes structured
+  `ClawnchError` reclassification (`bad_request`, `no_credentials`,
+  `rate_limited`, `not_found`, `challenge_expired`, `api_error`).
+- **`/launch` slash command** (`clawmes/commands/launch.py`) — guided
+  multi-turn flow for deploying a token: `/launch name <…>` →
+  `/launch symbol <…>` → optional `/launch description <…>` /
+  `/launch bypass <tx_hash>` → `/launch confirm`. Per-sender draft
+  state (concurrent flows in a shared channel).
+- **`/register_agent` slash command** (`clawmes/commands/agent.py`) —
+  two-step Clawnch agent registration. Calls
+  `/api/agents/register`, signs the returned challenge with the
+  active wallet, calls `/api/agents/verify`, prints the issued API
+  key for the user to save as `CLAWNCH_API_KEY`.
+- **`clawnch_launch` tool rewritten** — was previously dead-ended
+  on a missing imaginary-launchpad ABI. Now routes through
+  `ClawnchService` against the live HTTP API. Two actions:
+  `deploy` (params: name, symbol, description?, image?,
+  bypass_tx_hash?) and `info` (params: token). Clawnch's deployer
+  wallet pays gas server-side; the user's wallet only signs the
+  captcha.
+- **`clawnch_fees` tool rewritten** — now reads launch metadata +
+  fee accrual via Clawnch's read endpoints. Two actions: `my_launches`
+  (authenticated, lists the agent's launches) and `launch_info`
+  (public, single-token detail). Claim-side ops deferred until the
+  ClawnchFactory v2 fork ships.
+- **`clawmes:clawnch-launch` skill bundle**
+  (`clawmes/skills/clawnch-launch/SKILL.md`) — LLM-facing
+  documentation of the deploy flow so natural-language "I want to
+  launch a token" prompts route the agent to the right tools.
+- **`CLAWNCH_API_KEY` env var** — added to `plugin.yaml` (both
+  copies, byte-identical) as a secret, optional config. Required
+  for `/launch` and `clawnch_launch` deploys; read paths work
+  without it.
+- **`clawn.ch` added to `clawmes/lib/http.py` allowlist** so the
+  service can reach the launchpad's API.
+- **Source attribution** — every clawmes-originated deploy stamps
+  `source: "clawmes"` in the tokenParams body so the Clawnch
+  launchpad can render a "via clawmes" badge on the public launch
+  detail page.
+
 ### Added
 
 - `policy_manage` tool (`clawmes/tools/policy_manage.py`) — LLM-callable

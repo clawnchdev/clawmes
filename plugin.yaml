@@ -101,6 +101,10 @@ requires_env:
     description: BV-7X session token (after wallet-verify at bv7x.ai/terminal#developer); required for token-gated oracle + copy-trade endpoints
     url: https://bv7x.ai/terminal#developer
     secret: true
+  - name: CLAWNCH_API_KEY
+    description: Clawnch agent API key; required for /launch (token deploy via Clawnch launchpad). Issue via /register_agent in clawmes.
+    url: https://clawn.ch
+    secret: true
   - name: OPENGATEWAY_API_KEY
     description: gitlawb OpenGateway API key (ogw_live_…); recommended but currently optional during the partnership window
     url: https://gitlawb.com/opengateway

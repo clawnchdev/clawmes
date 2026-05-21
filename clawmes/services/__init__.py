@@ -40,6 +40,7 @@ def start_all() -> None:
     from clawmes.plans.scheduler import get_scheduler
     from clawmes.services.bankr_service import get_bankr_service
     from clawmes.services.bv7x import get_bv7x_service
+    from clawmes.services.clawnch import get_clawnch_service
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.command_history import get_command_history_service
     from clawmes.services.credential_redactor import get_credential_redactor
@@ -114,6 +115,10 @@ def start_all() -> None:
         #     Daily signal, regime, ETF flows, agent identity. The
         #     token-gated premium endpoints are deliberately NOT wired.
         get_bv7x_service,
+        # 6f. Clawnch launchpad HTTP client. Powers /launch +
+        #     /register_agent + the clawnch_launch / clawnch_fees tools.
+        #     Reads work unauthenticated; deploys require CLAWNCH_API_KEY.
+        get_clawnch_service,
         # 6d. OpenAI-compatible LLM gateway (gitlawb opengateway). Used
         #     by tools that need targeted inference outside the host
         #     Hermes agent loop. Independent from Hermes' main LLM —

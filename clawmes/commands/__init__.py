@@ -14,6 +14,7 @@ rejected.
 from __future__ import annotations
 
 from clawmes.commands import (
+    agent,
     allowlist,
     balance,
     discovery,
@@ -21,6 +22,7 @@ from clawmes.commands import (
     evolve,
     identity,
     info,
+    launch,
     onboarding,
     plans,
     policy,
@@ -55,6 +57,8 @@ def register_all(ctx) -> None:
     info.register(ctx)
     identity.register(ctx)
     bv7x_cmd.register(ctx)
+    launch.register(ctx)
+    agent.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel
