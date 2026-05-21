@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 73 commands. 21 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 75 commands. 22 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-73 slash commands across 14 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+75 slash commands across 15 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -85,6 +85,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Info** (5) | `/history` `/clear_history` `/version` `/about` `/uptime` |
 | **Agent identity** (1) | `/identity` — show/generate ed25519 keypair + did:key |
 | **BV-7X** (2) | `/bv7x` `/btc` |
+| **Launch (Clawnch)** (2) | `/launch` `/register_agent` — deploy a token from chat via the Clawnch launchpad |
 | **Meta** (2) | `/doctor` `/help` |
 
 A `pre_llm_call` hook injects the last 5 slash-command calls into LLM context, so the agent stops re-asking things you just answered via slash (`/balance` → "what's my balance?" → agent uses the cached result rather than re-fetching).
@@ -147,6 +148,35 @@ Clawmes wires the following partner / ecosystem projects directly into the tool 
 
 - **A2A protocol** — generic agent-to-agent JSON-RPC 2.0 client (`a2a_call` tool). `discover` fetches a peer's AgentCard at `/.well-known/agent-card.json`; `send_task` posts JSON-RPC tasks. Works against any A2A-speaking peer; tested against BV-7X.
 
+## Launch a token from chat
+
+Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token from a chat message:
+
+```
+/register_agent MyAgent | An agent that launches tokens
+# clawmes posts a challenge, your wallet signs it, clawn.ch
+# returns an apiKey. Save it as CLAWNCH_API_KEY in ~/.hermes/.env.
+
+/launch name MyCoin
+/launch symbol MC
+/launch description The next big thing       # optional
+/launch confirm
+# Clawnch's deployer wallet submits the Clanker tx server-side;
+# your wallet only signs the captcha. Returns tx hash + token
+# address.
+```
+
+Free-tier rate limit: 1 deploy per 24 hours per agent. To skip the cooldown, send `0.001 ETH` (or the current bypass amount) to the Clawnch bypass recipient on Base, then `/launch bypass <tx_hash>` and `/launch confirm`.
+
+How the gate works:
+
+→ `CLAWNCH_API_KEY` authenticates the agent to the Clawnch API
+→ The launchpad returns a 5-second captcha challenge (storage-slot read + signed message + keccak proof)
+→ Clawmes solves the captcha using the active wallet's `personal_sign`
+→ Clawnch's deployer wallet (server-side) pays gas and submits the underlying Clanker call
+
+Wallet signs only the off-chain captcha — Clawnch pays deploy gas. The `clawnch_launch` tool (LLM-callable) and `clawnch_fees` (read launches + fee accrual) follow the same path. See [`clawmes:clawnch-launch` skill](clawmes/skills/clawnch-launch/SKILL.md) for the LLM-facing surface.
+
 ## Security
 
 - WalletConnect mode: clawmes never holds unencrypted private keys.
@@ -182,11 +212,11 @@ hermes (the upstream CLI, hermes-agent ≥ 2026.4.x)
   └── PluginManager.discover_and_load()
         └── clawmes.register(ctx)
               ├── 52 tools     (registered via ctx.register_tool, write-gated)
-              ├── 73 commands  (registered via ctx.register_command)
+              ├── 75 commands  (registered via ctx.register_command)
               ├── 11 hooks     (pre_tool_call, post_tool_call, pre_llm_call, ...)
-              ├── 28 skills    (registered via ctx.register_skill, namespaced clawmes:*)
+              ├── 29 skills    (registered via ctx.register_skill, namespaced clawmes:*)
               ├── CLI subcmds  (registered via ctx.register_cli_command)
-              └── 21 services  (start_all() starts background lifecycle)
+              └── 22 services  (start_all() starts background lifecycle)
                     │
                     ├── subprocess: clawmes-wc-bridge   (Node — WalletConnect v2)
                     └── subprocess: clawmes-sa-bridge   (Node — MetaMask Smart Accounts; planned)
@@ -251,6 +281,9 @@ RESERVOIR_API_KEY=
 
 # Governance
 TALLY_API_KEY=
+
+# Clawnch launchpad (token deploys via /launch + /register_agent)
+CLAWNCH_API_KEY=      # issued by /register_agent or POST /api/agents/register on clawn.ch
 
 # Specialized
 GIZA_API_KEY=         # zkML inference

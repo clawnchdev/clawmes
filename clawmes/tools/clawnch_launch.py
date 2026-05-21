@@ -1,63 +1,67 @@
-"""``clawnch_launch`` — non-Bankr token launch via Clawnch launchpad.
+"""``clawnch_launch`` — deploy a token via the Clawnch launchpad.
 
-The non-Bankr alternative for token launches. Deploys an ERC-20 +
-creates a Uniswap V4 pool on Base directly, signed by the user's
-wallet. No gas sponsorship (user pays); no custodial layer.
+LLM-callable surface for the Clawnch deploy flow. Wraps
+:class:`clawmes.services.clawnch.ClawnchService` which talks to the
+launchpad HTTP API. Two actions:
 
-Four actions:
+  * ``deploy`` — submit a deploy. Service handles the captcha
+    challenge (sign message + read storage slot + compute keccak
+    proof), then posts the solution. Clawnch's deployer wallet pays
+    gas + submits the underlying Clanker tx server-side. Optional
+    ``bypass_tx_hash`` skips the 24h cooldown by paying ETH to the
+    bypass recipient (see ``CLAWNCH_BYPASS_RECIPIENT``).
+  * ``info`` — read launch metadata for an existing token.
 
-  * ``deploy``   — deploy ERC-20 with name/symbol/supply.
-  * ``pair``     — create the Uniswap V4 pool for the deployed token.
-  * ``seed_lp``  — seed initial liquidity (user provides paired-token
-    amount).
-  * ``info``     — read launch metadata.
+What used to be ``pair`` and ``seed_lp`` collapsed into ``deploy``:
+Clanker handles ERC-20 deploy + Uniswap V4 pool + initial liquidity
+seeding atomically in one call, so the multi-step ``pair`` /
+``seed_lp`` actions don't apply against the live launchpad. They're
+left out rather than stubbed.
 
-The Clawnch launchpad contract on Base handles all three on-chain
-steps. Tool builds calldata and routes through the wallet mode.
-``CLAWNCH_LAUNCHPAD_ADDRESS`` env var configures the contract; default
-points to the canonical deployment.
+Requires ``CLAWNCH_API_KEY``. Register an agent + obtain the key via
+``/register_agent`` or directly against ``POST /api/agents/register``
++ ``POST /api/agents/verify`` on clawn.ch.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from clawmes.lib.logger import logger_for
 from clawmes.lib.params import read_str
 from clawmes.lib.tool_result import error_result, json_result
-from clawmes.services.wallet import get_wallet_state
 from clawmes.tools.registry import register_with_ctx, write_tool
 
 _log = logger_for("tools.clawnch_launch")
-
-# Clawnch launchpad address must be supplied via env. The launchpad
-# contract isn't yet published; until then this tool requires
-# CLAWNCH_LAUNCHPAD_ADDRESS to be set explicitly. Fail-loud is better
-# than dispatching to a non-existent contract.
-_LAUNCH_GAS_DEFAULT = 1_500_000  # ERC-20 deploy + V4 pool init
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["deploy", "pair", "seed_lp", "info"],
+            "enum": ["deploy", "info"],
         },
-        "name": {"type": "string", "description": "Token name."},
-        "symbol": {"type": "string", "description": "Token symbol."},
-        "supply": {"type": "string", "description": "Initial supply (base units)."},
+        "name": {"type": "string", "description": "Token name (deploy)."},
+        "symbol": {"type": "string", "description": "Token symbol (deploy)."},
+        "description": {
+            "type": "string",
+            "description": "One-line description of the token (deploy).",
+        },
+        "image": {
+            "type": "string",
+            "description": "Image URL for token metadata (deploy, optional).",
+        },
+        "bypass_tx_hash": {
+            "type": "string",
+            "description": (
+                "Tx hash of >= 0.001 ETH paid to the Clawnch bypass "
+                "recipient. Skips the 24h deploy cooldown (deploy, "
+                "optional)."
+            ),
+        },
         "token": {
             "type": "string",
-            "description": "Existing token (for pair / seed_lp / info).",
-        },
-        "paired_amount": {
-            "type": "string",
-            "description": "ETH amount to pair with for seed_lp.",
-        },
-        "calldata": {
-            "type": "string",
-            "description": "Override calldata (advanced).",
+            "description": "Token address (info).",
         },
         "policyConfirmationNonce": {
             "type": "string",
@@ -72,80 +76,81 @@ _SCHEMA: dict[str, Any] = {
     name="clawnch_launch",
     toolset="clawmes-defi",
     description=(
-        "Non-custodial token launch via Clawnch launchpad on Base. "
-        "Deploys ERC-20, creates Uniswap V4 pool, seeds liquidity. "
-        "User signs every step (no gas sponsorship; use bankr_launch "
-        "for that)."
+        "Deploy a token on Base via the Clawnch launchpad. Clawnch "
+        "handles the deploy + initial liquidity atomically via the "
+        "Clanker SDK; the user's wallet signs a captcha challenge to "
+        "prove identity. Requires CLAWNCH_API_KEY (register an agent "
+        "with /register_agent)."
     ),
     schema=_SCHEMA,
     emoji="\U0001f31f",
 )
 def clawnch_launch(args: dict[str, Any], **kwargs: Any) -> str:
-    state = get_wallet_state()
-    if not state.connected or not state.address:
-        return error_result(
-            "No wallet connected. Run /connect first.",
-            code="wallet_not_connected",
-        )
-
     action = read_str(args, "action", required=True)
+
     if action == "info":
         return _handle_info(args)
+    return _handle_deploy(args)
 
-    calldata = read_str(args, "calldata")
-    if not calldata:
+
+def _handle_deploy(args: dict[str, Any]) -> str:
+    from clawmes.services.clawnch import ClawnchError, get_clawnch_service
+
+    name = read_str(args, "name")
+    symbol = read_str(args, "symbol")
+    if not name or not symbol:
         return error_result(
-            f"{action} requires explicit 'calldata' override at this "
-            "milestone — Clawnch ABI is not yet wired. Build the "
-            "calldata externally and pass through.",
-            code="not_implemented",
+            "deploy requires both 'name' and 'symbol'.",
+            code="param_error",
         )
 
-    return _send(state, calldata)
+    token_params: dict[str, Any] = {
+        "name": name,
+        "symbol": symbol,
+    }
+    if description := read_str(args, "description"):
+        token_params["description"] = description
+    if image := read_str(args, "image"):
+        token_params["image"] = image
 
+    bypass = read_str(args, "bypass_tx_hash") or None
 
-def _send(state, calldata: str) -> str:
-    from clawmes.services.wallet import get_wallet_service
-
-    launchpad = os.environ.get("CLAWNCH_LAUNCHPAD_ADDRESS")
-    if not launchpad:
-        return error_result(
-            "CLAWNCH_LAUNCHPAD_ADDRESS is not set. The Clawnch "
-            "launchpad address must be configured before this tool "
-            "can submit transactions. See the project README for "
-            "configuration.",
-            code="not_configured",
+    try:
+        result = get_clawnch_service().deploy(
+            token_params=token_params,
+            bypass_tx_hash=bypass,
         )
-    svc = get_wallet_service()
-    mode = svc.active_mode
-    if mode is None:
+    except ClawnchError as exc:
+        return error_result(exc.message, code=exc.code)
+    except Exception as exc:  # noqa: BLE001
+        return error_result(f"Launch failed: {exc}", code="api_error")
+
+    tx_hash = result.get("txHash") or result.get("tx_hash")
+    token_address = result.get("tokenAddress") or result.get("token_address")
+    summary_parts = [f"Launched {symbol} via Clawnch."]
+    if token_address:
+        summary_parts.append(f"Token: {token_address}")
+    if tx_hash:
+        summary_parts.append(f"Tx: {tx_hash}")
+    return json_result(result, summary=" ".join(summary_parts))
+
+
+def _handle_info(args: dict[str, Any]) -> str:
+    from clawmes.services.clawnch import ClawnchError, get_clawnch_service
+
+    token = read_str(args, "token")
+    if not token:
         return error_result(
-            "No active wallet mode; reconnect via /connect.",
-            code="wallet_not_connected",
+            "info requires 'token' (the launched token's address).",
+            code="param_error",
         )
     try:
-        tx_hash = mode.send_transaction(
-            to=launchpad,
-            value=0,
-            data=calldata,
-            gas=_LAUNCH_GAS_DEFAULT,
-            chain_id=8453,  # Base
-        )
+        data = get_clawnch_service().get_launch(token)
+    except ClawnchError as exc:
+        return error_result(exc.message, code=exc.code)
     except Exception as exc:  # noqa: BLE001
-        return error_result(f"Launch failed: {exc}", code="send_failed")
-    return json_result(
-        {"tx_hash": tx_hash, "launchpad": launchpad},
-        summary=f"Clawnch launch tx submitted: {tx_hash}",
-    )
-
-
-def _handle_info(args) -> str:
-    return error_result(
-        "Clawnch launch info requires the launchpad ABI which isn't "
-        "wired yet. Use the block_explorer tool to inspect the token "
-        "directly.",
-        code="not_implemented",
-    )
+        return error_result(f"Info read failed: {exc}", code="api_error")
+    return json_result(data, summary=f"Launch info for {token}")
 
 
 def register(ctx) -> None:
