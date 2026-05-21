@@ -41,6 +41,7 @@ def start_all() -> None:
     from clawmes.services.bankr_service import get_bankr_service
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.credential_redactor import get_credential_redactor
+    from clawmes.services.endpoint_allowlist import get_endpoint_allowlist_service
     from clawmes.services.explorer import get_explorer_service
     from clawmes.services.lifi import get_lifi_service
     from clawmes.services.mode_service import get_mode_service
@@ -58,6 +59,10 @@ def start_all() -> None:
         # 1. Security primitives — credential redactor must be live
         #    before any tool result flows through transform_tool_result.
         get_credential_redactor,
+        # 1a. Endpoint allowlist — outbound HTTP guard. Read by
+        #     clawmes.lib.http._check_allowlist; must be live before
+        #     the first HTTP call any later service makes.
+        get_endpoint_allowlist_service,
         # 2. Mode service — used by stage 1 of the @write_tool gate.
         #    Live before any tool dispatch.
         get_mode_service,

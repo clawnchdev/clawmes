@@ -115,9 +115,27 @@ def _check_allowlist(url: str, *, extra_hosts: frozenset[str] | None = None) -> 
         return
     if extra_hosts and host in extra_hosts:
         return
+    # Consult the runtime user allowlist + record the block for audit.
+    # Defensive import so a test environment without the services
+    # subsystem (or a service that hasn't been started yet) doesn't
+    # break the existing default-allowlist check.
+    try:
+        from clawmes.services.endpoint_allowlist import (
+            get_endpoint_allowlist_service,
+        )
+
+        svc = get_endpoint_allowlist_service()
+    except Exception:  # noqa: BLE001 — never let allowlist plumbing kill a request
+        svc = None
+    if svc is not None:
+        if svc.is_allowed(host):
+            return
+        svc.record_block(url, host)
     raise NetworkAllowlistError(
         f"Host {host!r} is not on the clawmes network allowlist. "
-        "Extend via clawmes.network_allowlist.extra_hosts in config.yaml."
+        "Add via /allow <host> for this session, or extend "
+        "clawmes.network_allowlist.extra_hosts in config.yaml for "
+        "permanent additions."
     )
 
 

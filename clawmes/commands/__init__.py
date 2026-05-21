@@ -14,6 +14,7 @@ rejected.
 from __future__ import annotations
 
 from clawmes.commands import (
+    allowlist,
     discovery,
     doctor,
     onboarding,
@@ -41,6 +42,7 @@ def register_all(ctx) -> None:
     doctor.register(ctx)
     discovery.register(ctx)
     onboarding.register(ctx)
+    allowlist.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel

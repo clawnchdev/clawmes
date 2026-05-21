@@ -84,6 +84,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   today, not enforced — a future PR will wire enforcement (suppress
   tool registrations on a per-sender basis) into the
   `clawmes/tools/__init__.py` register loop.
+- **Endpoint-allowlist service** (`clawmes/services/endpoint_allowlist.py`)
+  layers two capabilities on top of the existing static allowlist in
+  `clawmes/lib/http.py`:
+    - Runtime user-added hosts (session-scoped). Added via `/allow
+      <host>`, removed via `/disallow <host>`. Resets on restart by
+      design — an attacker who tricks the agent into adding a host
+      can't keep it added across processes.
+    - Audit ring buffer. Every blocked HTTP attempt is recorded with
+      timestamp, host, and URL (default ring size 100). Reviewable
+      via `/allowlist`.
+- 3 new commands: `/allowlist` (show defaults + user-added + recent
+  blocks), `/allow <host>` (add session host), `/disallow <host>`
+  (remove user host; defaults are immutable through this surface).
+- `clawmes/lib/http._check_allowlist` now consults the service after
+  the default + per-call `extra_hosts` checks, and records blocks for
+  audit. Defensive import — if the services subsystem hasn't started
+  yet, the existing default-allowlist behavior continues to work.
 
 ### Documentation
 
