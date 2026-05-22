@@ -12,6 +12,12 @@ launchpad HTTP API. Two actions:
     bypass recipient (see ``CLAWNCH_BYPASS_RECIPIENT``).
   * ``info`` — read launch metadata for an existing token.
 
+Metadata: ``image`` + per-platform social URLs (``twitter``,
+``website``, ``telegram``, ``farcaster``, ``discord``) are passed
+through to the launchpad's ``tokenParams.metadata.socialMediaUrls``.
+Each platform value is normalized (``@handle`` -> full URL when the
+platform has a stable user URL like x.com / t.me / warpcast).
+
 What used to be ``pair`` and ``seed_lp`` collapsed into ``deploy``:
 Clanker handles ERC-20 deploy + Uniswap V4 pool + initial liquidity
 seeding atomically in one call, so the multi-step ``pair`` /
@@ -34,6 +40,39 @@ from clawmes.tools.registry import register_with_ctx, write_tool
 
 _log = logger_for("tools.clawnch_launch")
 
+
+# Map of (schema arg name, clawnch platform name, base URL). Base URL
+# is empty for platforms that use full invite / handle URLs (discord,
+# website). Matches the same set the /launch command exposes.
+_SOCIAL_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("twitter", "twitter", "https://x.com/"),
+    ("website", "website", ""),
+    ("telegram", "telegram", "https://t.me/"),
+    ("farcaster", "farcaster", "https://warpcast.com/"),
+    ("discord", "discord", ""),
+)
+
+
+def _normalize_social(value: str, base_url: str) -> str:
+    """Normalize a social handle / URL. Mirrors commands.launch logic.
+
+    ``@handle`` or ``handle`` becomes ``base_url + handle`` when a
+    base URL is provided; full ``http(s)://`` URLs pass through.
+    Empty base URL = treat as a raw URL (just strip whitespace + add
+    ``https://`` for bare hostnames).
+    """
+    v = value.strip()
+    if v.startswith(("http://", "https://")):
+        return v
+    if base_url:
+        handle = v.removeprefix("@").strip()
+        return f"{base_url}{handle}" if handle else v
+    # No base URL — bare-hostname autocomplete or pass through.
+    if "." in v and " " not in v:
+        return f"https://{v}"
+    return v
+
+
 _SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -50,6 +89,28 @@ _SCHEMA: dict[str, Any] = {
         "image": {
             "type": "string",
             "description": "Image URL for token metadata (deploy, optional).",
+        },
+        "twitter": {
+            "type": "string",
+            "description": (
+                "X / Twitter handle (with or without @) or full URL (deploy, optional)."
+            ),
+        },
+        "website": {
+            "type": "string",
+            "description": "Website URL (deploy, optional).",
+        },
+        "telegram": {
+            "type": "string",
+            "description": ("Telegram handle or invite URL (deploy, optional)."),
+        },
+        "farcaster": {
+            "type": "string",
+            "description": ("Farcaster handle or full Warpcast URL (deploy, optional)."),
+        },
+        "discord": {
+            "type": "string",
+            "description": "Discord invite URL (deploy, optional).",
         },
         "bypass_tx_hash": {
             "type": "string",
@@ -79,8 +140,9 @@ _SCHEMA: dict[str, Any] = {
         "Deploy a token on Base via the Clawnch launchpad. Clawnch "
         "handles the deploy + initial liquidity atomically via the "
         "Clanker SDK; the user's wallet signs a captcha challenge to "
-        "prove identity. Requires CLAWNCH_API_KEY (register an agent "
-        "with /register_agent)."
+        "prove identity. Supports image + social metadata (twitter / "
+        "website / telegram / farcaster / discord). Requires "
+        "CLAWNCH_API_KEY (register an agent with /register_agent)."
     ),
     schema=_SCHEMA,
     emoji="\U0001f31f",
@@ -112,6 +174,14 @@ def _handle_deploy(args: dict[str, Any]) -> str:
         token_params["description"] = description
     if image := read_str(args, "image"):
         token_params["image"] = image
+
+    # Build socialMediaUrls from individual platform args.
+    socials: list[dict[str, str]] = []
+    for arg_key, platform_name, base_url in _SOCIAL_FIELDS:
+        if value := read_str(args, arg_key):
+            socials.append({"platform": platform_name, "url": _normalize_social(value, base_url)})
+    if socials:
+        token_params["metadata"] = {"socialMediaUrls": socials}
 
     bypass = read_str(args, "bypass_tx_hash") or None
 

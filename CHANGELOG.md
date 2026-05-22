@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added — launch metadata (image + socials)
+
+- **`/launch image <url>`** — set the token image URL.
+- **`/launch twitter <handle|url>`** (alias `/launch x`) — set X / Twitter
+  handle or full URL. Bare handles (`clawnchbot`, `@clawnchbot`) are
+  normalized to `https://x.com/<handle>`; full URLs pass through.
+- **`/launch website <url>`** — set the project website.
+- **`/launch telegram <handle|url>`** — set Telegram handle or invite URL.
+  Bare handles normalize to `https://t.me/<handle>`.
+- **`/launch farcaster <handle|url>`** — set Farcaster handle. Bare
+  handles normalize to `https://warpcast.com/<handle>`.
+- **`/launch discord <url>`** — set Discord invite URL (no
+  normalization; full URLs only).
+- **`clawnch_launch` tool** — accepts the same set of metadata args
+  (`image`, `twitter`, `website`, `telegram`, `farcaster`, `discord`)
+  with the same normalization logic. LLM can pass them directly per
+  the updated OpenAI schema.
+- Collected metadata is serialized to `tokenParams.image` +
+  `tokenParams.metadata.socialMediaUrls` per the Clawnch API contract,
+  matching the format the launchpad's deploy endpoint already accepts
+  (server-side handling unchanged).
+- `/launch status` and `/launch` (usage) now render the `socials`
+  sub-map with one line per platform for readability.
+
 ## 0.2.0 — 2026-05-21
 
 Major release covering ten merged PRs plus the Clawnch launchpad

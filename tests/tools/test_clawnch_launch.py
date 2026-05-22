@@ -81,6 +81,87 @@ class TestDeploy:
         assert params["description"] == "the foo coin"
         assert params["image"] == "https://x/foo.png"
 
+    def test_with_socials_normalized(self, fake_svc):
+        clawnch_launch(
+            {
+                "action": "deploy",
+                "name": "Foo",
+                "symbol": "FOO",
+                "twitter": "clawn",
+                "website": "https://mycoin.xyz",
+                "telegram": "@clawnchalerts",
+                "farcaster": "clawn",
+                "discord": "https://discord.gg/abc",
+            }
+        )
+        params = fake_svc.deploys[0]["params"]
+        urls = {entry["platform"]: entry["url"] for entry in params["metadata"]["socialMediaUrls"]}
+        assert urls["twitter"] == "https://x.com/clawn"
+        assert urls["website"] == "https://mycoin.xyz"
+        assert urls["telegram"] == "https://t.me/clawnchalerts"
+        assert urls["farcaster"] == "https://warpcast.com/clawn"
+        assert urls["discord"] == "https://discord.gg/abc"
+
+    def test_full_url_pass_through(self, fake_svc):
+        clawnch_launch(
+            {
+                "action": "deploy",
+                "name": "Foo",
+                "symbol": "FOO",
+                "twitter": "https://x.com/already-formatted",
+            }
+        )
+        params = fake_svc.deploys[0]["params"]
+        urls = params["metadata"]["socialMediaUrls"]
+        assert urls[0]["url"] == "https://x.com/already-formatted"
+
+    def test_bare_hostname_without_base_url_gets_https(self, fake_svc):
+        # website has no base URL — bare-hostname autocomplete applies
+        clawnch_launch(
+            {
+                "action": "deploy",
+                "name": "Foo",
+                "symbol": "FOO",
+                "website": "mycoin.xyz",
+            }
+        )
+        params = fake_svc.deploys[0]["params"]
+        urls = params["metadata"]["socialMediaUrls"]
+        assert urls[0]["url"] == "https://mycoin.xyz"
+
+    def test_no_metadata_when_no_socials(self, fake_svc):
+        clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO"})
+        params = fake_svc.deploys[0]["params"]
+        assert "metadata" not in params
+
+    def test_handle_only_at_falls_back(self, fake_svc):
+        # Edge case: bare @ for twitter — falls back to raw value
+        clawnch_launch(
+            {
+                "action": "deploy",
+                "name": "Foo",
+                "symbol": "FOO",
+                "twitter": "@",
+            }
+        )
+        params = fake_svc.deploys[0]["params"]
+        urls = params["metadata"]["socialMediaUrls"]
+        assert urls[0]["url"] == "@"
+
+    def test_non_url_passthrough_for_url_fields(self, fake_svc):
+        # website has empty base_url + the value doesn't look like a URL
+        clawnch_launch(
+            {
+                "action": "deploy",
+                "name": "Foo",
+                "symbol": "FOO",
+                "website": "not a url",
+            }
+        )
+        params = fake_svc.deploys[0]["params"]
+        urls = params["metadata"]["socialMediaUrls"]
+        assert urls[0]["url"] == "not a url"
+
     def test_with_bypass(self, fake_svc):
         clawnch_launch(
             {

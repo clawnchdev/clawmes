@@ -81,10 +81,18 @@ the public launch detail page. Observable + intentional.
 | `/launch name <token name>` | Step 1: set name. |
 | `/launch symbol <TICKER>` | Step 2: set symbol. |
 | `/launch description <text>` | Optional one-liner. |
+| `/launch image <url>` | Token image URL. |
+| `/launch twitter <handle\|url>` | X / Twitter (alias: `/launch x`). Accepts `@handle`, `handle`, or full URL. |
+| `/launch website <url>` | Website URL. |
+| `/launch telegram <handle\|url>` | Telegram handle or invite URL. |
+| `/launch farcaster <handle\|url>` | Farcaster handle or Warpcast URL. |
+| `/launch discord <url>` | Discord invite URL. |
 | `/launch bypass <tx_hash>` | Optional: skip 24h cooldown. |
 | `/launch status` | Show current draft. |
 | `/launch confirm` | Deploy. |
 | `/launch cancel` | Clear draft. |
+
+Social handles are normalized — `/launch twitter clawnchbot` becomes `https://x.com/clawnchbot`. Full URLs pass through unchanged. The launchpad stores them as `tokenParams.metadata.socialMediaUrls` and may render them as badges on the launch detail page.
 
 ## Tool actions
 
@@ -92,8 +100,10 @@ the public launch detail page. Observable + intentional.
 
 | Action | Returns |
 |---|---|
-| `deploy` | `{txHash, tokenAddress, ...}` on success. Requires `name`, `symbol`; accepts `description`, `image`, `bypass_tx_hash`. |
+| `deploy` | `{txHash, tokenAddress, ...}` on success. Requires `name`, `symbol`; accepts `description`, `image`, `twitter`, `website`, `telegram`, `farcaster`, `discord`, `bypass_tx_hash`. |
 | `info` | Launch metadata for a deployed token. Requires `token` (address). |
+
+Each social arg is normalized the same way the slash command does — bare handles become full platform URLs, full URLs pass through. Pass `discord` and `website` as complete URLs.
 
 ### `clawnch_fees`
 
