@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.2.1 — 2026-05-22
+
 ### Added — launch metadata (image + socials)
 
 - **`/launch image <url>`** — set the token image URL.
