@@ -106,6 +106,124 @@ class TestDraftBuilding:
         assert "alice" not in launch_mod._log_state
 
 
+class TestImage:
+    async def test_image_requires_value(self):
+        out = await launch_mod.handle_launch("image", sender_id="alice")
+        assert "Usage" in out
+
+    async def test_image_full_url(self):
+        out = await launch_mod.handle_launch("image https://i.imgur.com/x.png", sender_id="alice")
+        assert "Image set: https://i.imgur.com/x.png" in out
+        assert launch_mod._log_state["alice"]["image"] == "https://i.imgur.com/x.png"
+
+    async def test_image_bare_hostname_gets_https(self):
+        await launch_mod.handle_launch("image example.com/x.png", sender_id="alice")
+        assert launch_mod._log_state["alice"]["image"] == "https://example.com/x.png"
+
+    async def test_image_passthrough_for_weird_input(self):
+        # Doesn't look like a URL — pass through unchanged (no autocomplete)
+        await launch_mod.handle_launch("image not a url", sender_id="alice")
+        assert launch_mod._log_state["alice"]["image"] == "not a url"
+
+
+class TestSocialPlatforms:
+    async def test_twitter_handle_normalized(self):
+        out = await launch_mod.handle_launch("twitter clawnchbot", sender_id="alice")
+        assert "Twitter set" in out
+        assert "https://x.com/clawnchbot" in out
+        socials = launch_mod._log_state["alice"]["socials"]
+        assert socials["twitter"] == "https://x.com/clawnchbot"
+
+    async def test_twitter_at_handle_normalized(self):
+        await launch_mod.handle_launch("twitter @clawnchbot", sender_id="alice")
+        assert launch_mod._log_state["alice"]["socials"]["twitter"] == "https://x.com/clawnchbot"
+
+    async def test_twitter_full_url_passthrough(self):
+        await launch_mod.handle_launch("twitter https://x.com/clawnchbot", sender_id="alice")
+        assert launch_mod._log_state["alice"]["socials"]["twitter"] == "https://x.com/clawnchbot"
+
+    async def test_x_alias_works(self):
+        # /launch x is an alias for /launch twitter; stores under "twitter"
+        await launch_mod.handle_launch("x clawnchbot", sender_id="alice")
+        assert "twitter" in launch_mod._log_state["alice"]["socials"]
+
+    async def test_telegram_handle_normalized(self):
+        await launch_mod.handle_launch("telegram clawnchalerts", sender_id="alice")
+        assert launch_mod._log_state["alice"]["socials"]["telegram"] == "https://t.me/clawnchalerts"
+
+    async def test_farcaster_handle_normalized(self):
+        await launch_mod.handle_launch("farcaster clawn", sender_id="alice")
+        assert (
+            launch_mod._log_state["alice"]["socials"]["farcaster"] == "https://warpcast.com/clawn"
+        )
+
+    async def test_discord_url_passthrough(self):
+        await launch_mod.handle_launch("discord https://discord.gg/abc", sender_id="alice")
+        assert launch_mod._log_state["alice"]["socials"]["discord"] == "https://discord.gg/abc"
+
+    async def test_discord_bare_hostname_gets_https(self):
+        await launch_mod.handle_launch("discord discord.gg/abc", sender_id="alice")
+        assert launch_mod._log_state["alice"]["socials"]["discord"] == "https://discord.gg/abc"
+
+    async def test_website_full_url(self):
+        await launch_mod.handle_launch("website https://mycoin.xyz", sender_id="alice")
+        assert launch_mod._log_state["alice"]["socials"]["website"] == "https://mycoin.xyz"
+
+    async def test_website_bare_hostname(self):
+        await launch_mod.handle_launch("website mycoin.xyz", sender_id="alice")
+        assert launch_mod._log_state["alice"]["socials"]["website"] == "https://mycoin.xyz"
+
+    async def test_handle_only_at_falls_back(self):
+        # Edge case: just an @ with no handle. Falls back to raw value.
+        await launch_mod.handle_launch("twitter @", sender_id="alice")
+        assert launch_mod._log_state["alice"]["socials"]["twitter"] == "@"
+
+    async def test_platform_requires_value(self):
+        out = await launch_mod.handle_launch("twitter", sender_id="alice")
+        assert "Usage" in out
+        assert "/launch twitter" in out
+
+
+class TestConfirmIncludesMetadata:
+    async def test_confirm_passes_image(self, fake_svc):
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        await launch_mod.handle_launch("image https://i.imgur.com/x.png", sender_id="alice")
+        await launch_mod.handle_launch("confirm", sender_id="alice")
+        params = fake_svc.deploys[0]["params"]
+        assert params["image"] == "https://i.imgur.com/x.png"
+
+    async def test_confirm_packs_socials(self, fake_svc):
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        await launch_mod.handle_launch("twitter clawn", sender_id="alice")
+        await launch_mod.handle_launch("website mycoin.xyz", sender_id="alice")
+        await launch_mod.handle_launch("confirm", sender_id="alice")
+        params = fake_svc.deploys[0]["params"]
+        urls = params["metadata"]["socialMediaUrls"]
+        platforms = {entry["platform"]: entry["url"] for entry in urls}
+        assert platforms["twitter"] == "https://x.com/clawn"
+        assert platforms["website"] == "https://mycoin.xyz"
+
+    async def test_confirm_no_metadata_when_none_set(self, fake_svc):
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        await launch_mod.handle_launch("confirm", sender_id="alice")
+        params = fake_svc.deploys[0]["params"]
+        assert "metadata" not in params
+        assert "image" not in params
+
+
+class TestStatusRendersSocials:
+    async def test_status_groups_socials(self):
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("twitter clawn", sender_id="alice")
+        out = await launch_mod.handle_launch("status", sender_id="alice")
+        assert "socials:" in out
+        assert "twitter" in out
+        assert "https://x.com/clawn" in out
+
+
 class TestPerSenderIsolation:
     async def test_two_senders_independent(self):
         await launch_mod.handle_launch("name AliceCoin", sender_id="alice")

@@ -160,11 +160,19 @@ Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token fr
 /launch name MyCoin
 /launch symbol MC
 /launch description The next big thing       # optional
+/launch image https://i.imgur.com/mycoin.png # optional
+/launch twitter mycoin                       # optional — also: /launch x
+/launch website mycoin.xyz                   # optional
+/launch telegram mycoinchat                  # optional
+/launch farcaster mycoin                     # optional
+/launch discord https://discord.gg/abc       # optional
 /launch confirm
 # Clawnch's deployer wallet submits the Clanker tx server-side;
 # your wallet only signs the captcha. Returns tx hash + token
 # address.
 ```
+
+Social handles get normalized (`mycoin` → `https://x.com/mycoin`); full URLs pass through unchanged. They're persisted to `tokenParams.metadata.socialMediaUrls` on the launchpad side and may render as badges on the launch detail page.
 
 Free-tier rate limit: 1 deploy per 24 hours per agent. To skip the cooldown, send `0.001 ETH` (or the current bypass amount) to the Clawnch bypass recipient on Base, then `/launch bypass <tx_hash>` and `/launch confirm`.
 
