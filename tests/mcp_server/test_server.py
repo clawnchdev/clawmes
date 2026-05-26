@@ -172,6 +172,19 @@ class TestMainEntrypoint:
         assert callable(mcp_pkg.main)
         assert callable(srv.main)
 
+    def test_package_main_delegates_to_server_main(self, monkeypatch):
+        """``clawmes.mcp_server.main`` is a thin lazy-import wrapper
+        that defers to ``clawmes.mcp_server.server.main``. Verify it
+        actually calls through."""
+        called: dict = {"count": 0}
+
+        def _fake_main():
+            called["count"] += 1
+
+        monkeypatch.setattr(srv, "main", _fake_main)
+        mcp_pkg.main()
+        assert called["count"] == 1
+
     def test_main_handles_keyboard_interrupt(self, monkeypatch):
         async def _raise():
             raise KeyboardInterrupt()

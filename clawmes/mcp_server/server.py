@@ -29,14 +29,13 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from collections.abc import Callable
-from typing import Any
-
-import mcp.server.stdio
-from mcp.server.lowlevel import Server
-from mcp.types import TextContent, Tool
+from typing import TYPE_CHECKING, Any, Callable
 
 from clawmes import __version__
+
+if TYPE_CHECKING:  # pragma: no cover — type-check-only imports
+    from mcp.server.lowlevel import Server
+    from mcp.types import TextContent, Tool
 
 
 def _import_defi_price() -> Callable[..., str]:
@@ -116,8 +115,10 @@ _TOOL_FACTORIES: dict[str, Callable[[], Callable[..., str]]] = {
 }
 
 
-def _build_tool_list() -> list[Tool]:
+def _build_tool_list() -> list["Tool"]:
     """Reflect each exposed clawmes tool into an MCP ``Tool`` definition."""
+    from mcp.types import Tool
+
     tools: list[Tool] = []
     for name, factory in _TOOL_FACTORIES.items():
         fn = factory()
@@ -162,22 +163,27 @@ def _call_tool(name: str, arguments: dict[str, Any] | None) -> str:
         )
 
 
-def _wrap_call_tool_result(result: str) -> list[TextContent]:
+def _wrap_call_tool_result(result: str) -> list["TextContent"]:
     """Wrap a clawmes tool's JSON-string output as MCP TextContent.
 
     Split out from the decorator-wrapped closure inside ``build_server``
     so tests can verify the wrapping shape directly without going through
     the MCP SDK's request-dispatch plumbing.
     """
+    from mcp.types import TextContent
+
     return [TextContent(type="text", text=result)]
 
 
-def build_server() -> Server:
+def build_server() -> "Server":
     """Build the MCP Server object with clawmes tool handlers registered.
 
     Split out from :func:`main` so tests can drive the server in-process
     without running the stdio loop.
     """
+    from mcp.server.lowlevel import Server
+    from mcp.types import TextContent, Tool
+
     server: Server = Server(name="clawmes", version=__version__)
 
     @server.list_tools()
@@ -194,6 +200,8 @@ def build_server() -> Server:
 
 
 async def _run() -> None:
+    import mcp.server.stdio
+
     server = build_server()
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(

@@ -59,6 +59,10 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    # MCP SDK is in dev so tests/mcp_server/* can import it; the same
+    # SDK ships under the [mcp] extra for production use of the
+    # clawmes-mcp script entry.
+    "mcp>=1.0",
 ]
 test-network = [
     "responses>=0.25",

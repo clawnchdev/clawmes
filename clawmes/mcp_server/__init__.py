@@ -49,6 +49,17 @@ Configure Claude Desktop's ``~/Library/Application Support/Claude/claude_desktop
 
 from __future__ import annotations
 
-from clawmes.mcp_server.server import main
-
 __all__ = ["main"]
+
+
+def main() -> None:
+    """Lazy-loading entrypoint — defers the ``mcp`` import to runtime.
+
+    Lets ``clawmes.mcp_server`` be importable without the optional
+    ``[mcp]`` extra installed (so tests / linters / introspection
+    don't need the SDK), while preserving the ``clawmes-mcp`` script
+    entry's behavior for production use.
+    """
+    from clawmes.mcp_server.server import main as _real_main
+
+    _real_main()
