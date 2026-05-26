@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-78 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+79 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,7 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (3) | `/buy` `/trending` `/my_launches` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches |
+| **Trading & discovery** (4) | `/buy` `/trending` `/my_launches` `/burn` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault % |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -151,12 +151,10 @@ Clawmes wires the following partner / ecosystem projects directly into the tool 
 
 ## Launch a token from chat
 
-Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token from a chat message:
+Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token from a chat message. As of v0.4.0, the default is **non-custodial** — your wallet signs the deploy tx directly, no API key needed:
 
 ```
-/register_agent MyAgent | An agent that launches tokens
-# clawmes posts a challenge, your wallet signs it, clawn.ch
-# returns an apiKey. Save it as CLAWNCH_API_KEY in ~/.hermes/.env.
+/connect_local                               # or /connect (WalletConnect) / /connect_bankr
 
 /launch name MyCoin
 /launch symbol MC
@@ -168,34 +166,70 @@ Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token fr
 /launch farcaster mycoin                     # optional
 /launch discord https://discord.gg/abc       # optional
 /launch confirm
-# Clawnch's deployer wallet submits the Clanker tx server-side;
-# your wallet only signs the captcha. Returns tx hash + token
-# address.
+# clawmes calls https://www.clawn.ch/api/prepare/deploy for unsigned
+# Clanker factory calldata, then your wallet signs and submits.
+# 80% fees to you, 20% platform fee preserved in the rewards array.
+# Returns tx hash + token address.
 ```
 
 Social handles get normalized (`mycoin` → `https://x.com/mycoin`); full URLs pass through unchanged. They're persisted to `tokenParams.metadata.socialMediaUrls` on the launchpad side and may render as badges on the launch detail page.
 
-Free-tier rate limit: 1 deploy per 24 hours per agent. To skip the cooldown, send `0.005 ETH` (or the current bypass amount) to the Clawnch bypass recipient on Base, then `/launch bypass <tx_hash>` and `/launch confirm`.
-
-To claim a vault allocation, burn $CLAWNCH within 24 hours of the launch:
+To claim a vault allocation, burn $CLAWNCH before confirming:
 
 ```
-/launch burn 1000000            # signs + submits a 1M CLAWNCH burn from the active wallet (= 1% vault)
-/launch burn 10000000           # max 10M CLAWNCH (= 10% vault, the Clanker maximum)
+/burn 1000000                   # standalone burn: signs + submits 1M CLAWNCH = 1% vault
+/burn 10000000                  # max 10M CLAWNCH = 10% vault (Clanker maximum)
+/burn last                      # show the last burn tx hash you signed via clawmes
+
+# Or via the legacy /launch burn path (same outcome):
+/launch burn 1000000            # signs + submits a 1M CLAWNCH burn from the active wallet
 /launch burn 0x<tx_hash>        # or paste a tx hash if you burned externally
 /launch confirm                 # deploy with vault allocation applied
 ```
 
-Curve: 1k tokens allocated per 1 CLAWNCH burned (1M → 1%, 10M → 10%). Vault tokens are subject to the Clanker 7-day lockup. See [`api/lib/burn.ts`](https://github.com/clawnchdev/clawnch/blob/main/api/lib/burn.ts) for the exact verification rules.
+Curve: 1k tokens allocated per 1 CLAWNCH burned (1M → 1%, 10M → 10%). Vault tokens are subject to the Clanker 7-day lockup. See [`api/lib/burn.ts`](https://github.com/clawnchdev/clawnch/blob/main/api/lib/burn.ts) for the exact verification rules. Server-side verification happens on every deploy — passing `tokenParams.vault.percentage` without a verified `burnTxHash` is rejected with `VAULT_REQUIRES_BURN`.
 
-How the gate works:
+### Custodial deploys (legacy path)
 
-→ `CLAWNCH_API_KEY` authenticates the agent to the Clawnch API
-→ The launchpad returns a 5-second captcha challenge (storage-slot read + signed message + keccak proof)
-→ Clawmes solves the captcha using the active wallet's `personal_sign`
-→ Clawnch's deployer wallet (server-side) pays gas and submits the underlying Clanker call
+For users who can't pay deploy gas themselves, or who want server-paid gas with the existing agent-registration tracking:
 
-Wallet signs only the off-chain captcha — Clawnch pays deploy gas. The `clawnch_launch` tool (LLM-callable) and `clawnch_fees` (read launches + fee accrual) follow the same path. See [`clawmes:clawnch-launch` skill](clawmes/skills/clawnch-launch/SKILL.md) for the LLM-facing surface.
+```
+/register_agent MyAgent | An agent that launches tokens
+# clawmes posts a challenge, your wallet signs, clawn.ch returns an apiKey.
+# Save it as CLAWNCH_API_KEY in ~/.hermes/.env.
+
+/launch ... (same drafting steps)
+/launch confirm --custodial
+# Clawnch's deployer wallet submits the Clanker tx server-side;
+# your wallet only signs the captcha. Subject to the 24h cooldown.
+```
+
+Bypass the cooldown by sending `0.005 ETH` to the Clawnch bypass recipient on Base, then `/launch bypass <tx_hash>` + `/launch confirm --custodial`.
+
+### Export-only mode (for Base MCP, Claude Desktop, Cursor, ChatGPT)
+
+clawmes can also emit the unsigned calldata for you to paste into another agent surface — useful if you want to launch via Base MCP's `send_calls` from Claude Desktop or any other MCP-compatible client:
+
+```
+/launch name MyCoin
+/launch symbol MC
+/launch export
+# Prints a JSON {chain: "base", calls: [{to, data, value}]} block
+# ready to paste into Base MCP's send_calls.
+```
+
+### Launch alerts
+
+```
+/launch alerts                          # subscribe link + filter docs
+/launch alerts base-mcp                 # client-side filter docs for base-mcp source
+```
+
+All Clawnch deploys post to the public `@ClawnchAlerts` Telegram channel — custodial ones from the server, non-custodial / base-mcp ones from the on-chain indexer cron. Filter client-side using Telegram's built-in keyword highlighting.
+
+### How both deploy paths preserve fees
+
+Whether custodial or non-custodial, every deploy hard-codes Clawnch's 20% platform fee into the Clanker `rewards.recipients` array (the user gets 80%). The non-custodial path verifies this server-side before returning calldata and refuses to return anything if the platform fee recipient env var is misconfigured — fail-closed on fee economics. See [`clawmes:clawnch-launch` skill](clawmes/skills/clawnch-launch/SKILL.md) for the LLM-facing surface and `clawnch_launch` / `clawnch_fees` tools for the same path under the LLM.
 
 ## Trading + discovery from chat
 

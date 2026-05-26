@@ -19,6 +19,23 @@ def _isolate():
     buy_mod._draft_state.clear()
 
 
+@pytest.fixture(autouse=True)
+def _stub_clawnch_attribution(monkeypatch):
+    """Default the Clawnch attribution lookup to a no-result stub so
+    /buy quote tests don't make real network calls. Tests that need
+    a specific attribution explicitly override the patch (see
+    ``TestClawnchAttribution``)."""
+
+    class _NoResultSvc:
+        def get_launch(self, addr):  # noqa: ARG002
+            return {"error": "not found"}
+
+    import clawmes.services.clawnch as cl_mod
+
+    monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _NoResultSvc())
+    yield
+
+
 @pytest.fixture
 def fake_wallet(monkeypatch):
     state: dict = {"connected": False, "address": "0x" + "a" * 40}
@@ -430,6 +447,139 @@ class TestRecordingBestEffort:
         monkeypatch.setattr(ch_mod, "record_command_call", _boom)
         out = await buy_mod.handle_buy("")
         assert isinstance(out, str)
+
+
+class TestClawnchAttribution:
+    """`_lookup_clawnch_attribution` adds context to /buy quotes when
+    the buy token is in the Clawnch launch index."""
+
+    def test_not_a_dict_returns_none(self, monkeypatch):
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                return "not a dict"
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        assert buy_mod._lookup_clawnch_attribution("0x" + "1" * 40) is None
+
+    def test_error_field_returns_none(self, monkeypatch):
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                return {"error": "not found"}
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        assert buy_mod._lookup_clawnch_attribution("0x" + "1" * 40) is None
+
+    def test_success_false_returns_none(self, monkeypatch):
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                return {"success": False, "launch": None}
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        assert buy_mod._lookup_clawnch_attribution("0x" + "1" * 40) is None
+
+    def test_non_dict_launch_returns_none(self, monkeypatch):
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                return {"success": True, "launch": "garbage"}
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        assert buy_mod._lookup_clawnch_attribution("0x" + "1" * 40) is None
+
+    def test_full_attribution(self, monkeypatch):
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                return {
+                    "success": True,
+                    "launch": {
+                        "source": "base-mcp",
+                        "agentName": "MyAgent",
+                        "launchedAt": "2026-05-26T10:00:00.000Z",
+                    },
+                }
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        attr = buy_mod._lookup_clawnch_attribution("0x" + "1" * 40)
+        assert attr is not None
+        assert "base-mcp" in attr
+        assert "MyAgent" in attr
+        assert "2026-05-26" in attr
+
+    def test_no_launch_key_falls_back_to_top_level(self, monkeypatch):
+        # Some upstream branches return the launch directly (no wrapping)
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                return {
+                    "source": "clawmes",
+                    "agent": "AgentX",
+                }
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        attr = buy_mod._lookup_clawnch_attribution("0x" + "1" * 40)
+        assert attr is not None
+        assert "clawmes" in attr
+        assert "AgentX" in attr
+
+    def test_clawnch_error_returns_none(self, monkeypatch):
+        from clawmes.services.clawnch import ClawnchError
+
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                raise ClawnchError("not_found", "no row")
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        assert buy_mod._lookup_clawnch_attribution("0x" + "1" * 40) is None
+
+    def test_unexpected_error_returns_none(self, monkeypatch):
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                raise RuntimeError("upstream down")
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        assert buy_mod._lookup_clawnch_attribution("0x" + "1" * 40) is None
+
+    async def test_attribution_renders_in_quote(
+        self, fake_wallet, fake_find_token, fake_defi_swap, monkeypatch
+    ):
+        # Full smoke: a Clawnch-attributed token shows up in the quote
+        fake_wallet["connected"] = True
+        fake_find_token["result"] = {"baseToken": {"symbol": "MNEME", "address": "0x" + "1" * 40}}
+        fake_defi_swap["responses"]["quote"] = json.dumps(
+            {"isError": False, "details": {"buy_amount": "1000"}}
+        )
+
+        class _Svc:
+            def get_launch(self, addr):  # noqa: ARG002
+                return {
+                    "success": True,
+                    "launch": {
+                        "source": "clawmes",
+                        "agentName": "Agent42",
+                        "launchedAt": "2026-05-22T18:36:27.000Z",
+                    },
+                }
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        out = await buy_mod.handle_buy("MNEME 0.01")
+        assert "Clawnch: source clawmes" in out
+        assert "agent Agent42" in out
 
 
 class TestRegister:

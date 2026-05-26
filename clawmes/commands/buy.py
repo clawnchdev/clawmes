@@ -223,6 +223,13 @@ async def _quote(sender_id: str, parts: list[str]) -> str:
     }
     _set_draft(sender_id, draft)
 
+    # Best-effort Clawnch attribution — look the token up in the
+    # launchpad index. Doesn't affect the quote; just adds context so
+    # the user knows whether they're buying something Clawnch tracks.
+    # Failures (HTTP issues, address not in the index) silently skip
+    # the attribution line.
+    attribution = _lookup_clawnch_attribution(addr)
+
     lines = [
         f"Quote: {amount} ETH → {expected_out} {label}",
         f"  Address: {addr}",
@@ -232,9 +239,48 @@ async def _quote(sender_id: str, parts: list[str]) -> str:
         lines.append(f"  Price: {price}")
     if route:
         lines.append(f"  Route: {route}")
+    if attribution:
+        lines.append(f"  {attribution}")
     lines.append("")
     lines.append("Run /buy confirm to execute, or /buy cancel to discard.")
     return "\n".join(lines)
+
+
+def _lookup_clawnch_attribution(address: str) -> str | None:
+    """Return a one-line Clawnch attribution string, or None if not found.
+
+    Hits ``/api/launches?address=`` (the same endpoint /buy --clawnch
+    uses to verify). Renders source + agent + age when available so the
+    user can tell at a glance "yes, this is a Clawnch-launched token,
+    deployed N hours ago by source X."
+
+    Best-effort — never raises, never blocks the quote.
+    """
+    try:
+        from clawmes.services.clawnch import ClawnchError, get_clawnch_service
+
+        body = get_clawnch_service().get_launch(address)
+    except ClawnchError:
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(body, dict):
+        return None
+    if body.get("error") or body.get("success") is False:
+        return None
+    launch = body.get("launch") if "launch" in body else body
+    if not isinstance(launch, dict):
+        return None
+    source = launch.get("source") or "clawnch"
+    agent = launch.get("agentName") or launch.get("agent") or ""
+    launched_at = launch.get("launchedAt") or ""
+
+    parts = [f"Clawnch: source {source}"]
+    if agent:
+        parts.append(f"agent {agent}")
+    if launched_at:
+        parts.append(launched_at)
+    return " · ".join(parts)
 
 
 def _resolve_token(token_in: str, universe: str) -> tuple[str, str] | str:

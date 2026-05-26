@@ -6,6 +6,85 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.4.0 — 2026-05-26
+
+### Added — Base ecosystem integration
+
+clawmes now wires deeply into the Base MCP plugin work that landed
+in the clawnch backend. The headline change is that `/launch` no
+longer requires a Clawnch API key — when a wallet is connected, deploys
+go through the new non-custodial path (`GET /api/prepare/deploy`) and
+the user signs + pays gas directly.
+
+- **Non-custodial `/launch confirm` (new default)** — when a wallet is
+  connected, `/launch confirm` hits `/api/prepare/deploy` for unsigned
+  Clanker factory calldata and submits it via the active wallet mode.
+  No `CLAWNCH_API_KEY`, no `/register_agent` step, no 24h cooldown, no
+  captcha. The 80% / 20% fee split is preserved in the rewards array
+  of the prepared calldata.
+- **`/launch confirm --custodial`** — explicit opt-in to the old path
+  (server-paid gas, captcha challenge, API key required). Same flow as
+  v0.3.0's default `/launch confirm`.
+- **`/launch confirm --noncustodial`** — explicit opt-in to the new
+  path even without a connected wallet (will error out with a clear
+  message). Useful for scripted flows.
+- **`/launch export`** — emits unsigned Clanker calldata as a
+  JSON-shaped `{chain, calls}` block ready to paste into Base MCP's
+  `send_calls`, Claude Desktop, Cursor, or any other agent surface
+  with its own signing UX. No wallet operation on the clawmes side.
+- **`/launch alerts [source]`** — points users at the public
+  `@ClawnchAlerts` Telegram channel and documents how to filter the
+  feed client-side. Sources: `clawmes`, `moltbook`, `4claw`,
+  `clawtomaton`, `moltx`, `base-mcp`, `clawncher`.
+
+### Added — `/burn` command
+
+- **`/burn <amount>`** — standalone CLAWNCH burn, decoupled from
+  `/launch`. Signs an ERC-20 transfer to the burn address from the
+  active wallet. Range: 1,000,000 (1% vault) to 10,000,000 (10% max
+  vault, Clanker limit). Returns the burn tx hash you can plug into
+  `/launch burn <tx_hash>`, `/api/prepare/deploy?burnTxHash=…`, or
+  any other surface that takes a burn-tx receipt.
+- **`/burn last`** — shows the most recent burn tx hash submitted via
+  this command, useful for piping between flows without scrolling.
+
+### Added — `/buy` Clawnch attribution
+
+- `/buy <token> <eth>` quotes now include a Clawnch-attribution line
+  when the buy token is in the launchpad index. Format:
+  `Clawnch: source <X> · agent <Y> · launched <ISO>`. Best-effort —
+  lookup failures silently skip the line, no impact on the swap.
+
+### Added — `ClawnchService.prepare_deploy()`
+
+- New service method wrapping `GET /api/prepare/deploy`. Public
+  endpoint, no auth required. Returns the envelope shape
+  `{ok, data: {to, data, value, chainId}, meta: {…}}` and maps upstream
+  error codes (`rate_limited`, `invalid_burn`, `invalid_from`, etc.)
+  to clawmes' standard `ClawnchError` classifications. Used by both
+  `/launch confirm` (non-custodial path) and `/launch export`.
+- `ClawnchService._get()` gains an optional `params` kwarg so the
+  query string for `/api/prepare/deploy` doesn't have to be
+  constructed by hand.
+
+### Tests
+
+- +77 new tests across `tests/services/test_clawnch.py` (prepare_deploy
+  full error-code coverage), `tests/commands/test_launch.py`
+  (non-custodial path: 19 cases covering wallet states, receipt parsing,
+  prepare errors, mode resolution, export, alerts), `tests/commands/test_buy.py`
+  (8 attribution cases), `tests/commands/test_burn.py` (20 cases for
+  the new command). Full suite 2936 passing at 100% coverage.
+
+### Notes
+
+- Existing custodial flow remains fully supported behind
+  `/launch confirm --custodial`. The `CLAWNCH_API_KEY` environment
+  variable is still honored when set. Users on v0.3.0 who relied on
+  the custodial default get a one-line behavior change: passing
+  `--custodial` to confirm now preserves the old path, otherwise the
+  new non-custodial path runs (which is almost always what they want).
+
 ## 0.3.0 — 2026-05-26
 
 ### Added — trading, discovery, burn-to-vault

@@ -267,6 +267,103 @@ class ClawnchService(Service):
             token_params=token_params,
         )
 
+    # ── non-custodial deploy (GET /api/prepare/deploy) ──────────────
+
+    def prepare_deploy(
+        self,
+        *,
+        from_address: str,
+        name: str,
+        symbol: str,
+        description: str | None = None,
+        image: str | None = None,
+        twitter: str | None = None,
+        website: str | None = None,
+        telegram: str | None = None,
+        farcaster: str | None = None,
+        discord: str | None = None,
+        burn_tx_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Get unsigned Clanker factory calldata for a non-custodial deploy.
+
+        Hits ``GET /api/prepare/deploy``. Returns the envelope shape:
+
+            {
+                "ok": True,
+                "data": {"to": "0xE85A…", "data": "0xdf40224a…", "value": "0x0", "chainId": 8453},
+                "meta": {
+                    "platformFeeBps": 2000,
+                    "userFeeBps": 8000,
+                    "vaultPercentage": 0,
+                    "source": "base-mcp",
+                    ...
+                },
+            }
+
+        On any 4xx (``ok: false``) Clawnch error, raises ``ClawnchError``
+        with the upstream ``code`` mapped to one of the standard
+        clawmes error classifications.
+
+        Unlike :meth:`deploy`, this path is non-custodial:
+        - No API key required (``/api/prepare/deploy`` is public).
+        - No captcha solving — the wallet signs the deploy tx directly.
+        - The user's wallet pays gas.
+        - Same 20% platform fee preserved in the rewards array.
+
+        ``burn_tx_hash`` is verified server-side; if valid, the
+        corresponding vault clause gets baked into the returned
+        calldata.
+        """
+        if not from_address:
+            raise ClawnchError("bad_request", "from_address is required")
+        if not name:
+            raise ClawnchError("bad_request", "name is required")
+        if not symbol:
+            raise ClawnchError("bad_request", "symbol is required")
+
+        params: dict[str, str] = {
+            "from": from_address,
+            "name": name,
+            "symbol": symbol,
+        }
+        if description:
+            params["description"] = description
+        if image:
+            params["image"] = image
+        if twitter:
+            params["twitter"] = twitter
+        if website:
+            params["website"] = website
+        if telegram:
+            params["telegram"] = telegram
+        if farcaster:
+            params["farcaster"] = farcaster
+        if discord:
+            params["discord"] = discord
+        if burn_tx_hash:
+            params["burnTxHash"] = burn_tx_hash
+
+        # Public endpoint — no auth header sent.
+        body = self._get("/api/prepare/deploy", params=params)
+        if not isinstance(body, dict):
+            raise ClawnchError("api_error", "prepare_deploy returned non-dict body")
+        if body.get("ok") is False:
+            code = str(body.get("code") or "api_error")
+            msg = str(body.get("error") or "prepare_deploy failed")
+            # Map a couple of upstream codes to clawmes' classification.
+            if code == "rate_limited":
+                raise ClawnchError("rate_limited", msg)
+            if code in (
+                "invalid_from",
+                "invalid_name",
+                "invalid_symbol",
+                "missing_required",
+                "invalid_burn",
+            ):
+                raise ClawnchError("bad_request", msg)
+            raise ClawnchError("api_error", msg)
+        return body
+
     # ── reads ───────────────────────────────────────────────────────
 
     def get_my_launches(self) -> dict[str, Any]:
@@ -344,7 +441,12 @@ class ClawnchService(Service):
             self._reclassify(exc)
             raise
 
-    def _get(self, path: str) -> dict[str, Any]:
+    def _get(
+        self,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         url = self._base_url + path
         headers: dict[str, str] = {}
         with self._lock:
@@ -352,7 +454,7 @@ class ClawnchService(Service):
         if key:
             headers["Authorization"] = f"Bearer {key}"
         try:
-            return http_get(url, headers=headers, timeout=15.0)
+            return http_get(url, params=params, headers=headers, timeout=15.0)
         except Exception as exc:  # noqa: BLE001
             self._reclassify(exc)
             raise
