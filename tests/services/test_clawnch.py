@@ -522,6 +522,156 @@ class TestDeployConvenience:
 # ──────────────────────────────────────────────────────────────────────
 
 
+class TestPrepareDeploy:
+    """``prepare_deploy`` — non-custodial calldata flow."""
+
+    def _ok_payload(self):
+        return {
+            "ok": True,
+            "data": {
+                "to": "0xE85A59c628F7d27878ACeB4bf3b35733630083a9",
+                "data": "0xdf40224a" + "00" * 32,
+                "value": "0x0",
+                "chainId": 8453,
+            },
+            "meta": {
+                "platformFeeBps": 2000,
+                "userFeeBps": 8000,
+                "vaultPercentage": 0,
+                "source": "base-mcp",
+            },
+        }
+
+    def test_requires_from(self, svc):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="", name="X", symbol="X")
+        assert exc_info.value.code == "bad_request"
+
+    def test_requires_name(self, svc):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="", symbol="X")
+        assert exc_info.value.code == "bad_request"
+
+    def test_requires_symbol(self, svc):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="")
+        assert exc_info.value.code == "bad_request"
+
+    def test_returns_envelope_on_ok(self, svc, monkeypatch):
+        captured: list[dict] = []
+        payload = self._ok_payload()
+
+        def _get(url, params=None, headers=None, timeout=None):
+            captured.append({"url": url, "params": params})
+            return payload
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
+        out = svc.prepare_deploy(
+            from_address="0x" + "1" * 40,
+            name="MyCoin",
+            symbol="MYC",
+            description="hello",
+            image="https://example.com/x.png",
+            twitter="https://x.com/clawnch",
+            website="clawn.ch",
+            telegram="https://t.me/clawnch",
+            farcaster="https://warpcast.com/clawnch",
+            discord="https://discord.gg/clawnch",
+            burn_tx_hash="0x" + "a" * 64,
+        )
+        assert out == payload
+        # All optional params propagated to the query string
+        sent = captured[0]["params"]
+        assert sent["from"] == "0x" + "1" * 40
+        assert sent["name"] == "MyCoin"
+        assert sent["symbol"] == "MYC"
+        assert sent["description"] == "hello"
+        assert sent["image"] == "https://example.com/x.png"
+        assert sent["twitter"] == "https://x.com/clawnch"
+        assert sent["website"] == "clawn.ch"
+        assert sent["telegram"] == "https://t.me/clawnch"
+        assert sent["farcaster"] == "https://warpcast.com/clawnch"
+        assert sent["discord"] == "https://discord.gg/clawnch"
+        assert sent["burnTxHash"] == "0x" + "a" * 64
+
+    def test_minimal_params_omit_optionals(self, svc, monkeypatch):
+        captured: list[dict] = []
+
+        def _get(url, params=None, headers=None, timeout=None):
+            captured.append({"params": params})
+            return self._ok_payload()
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
+        svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        sent = captured[0]["params"]
+        assert "description" not in sent
+        assert "image" not in sent
+        assert "twitter" not in sent
+        assert "burnTxHash" not in sent
+
+    def test_non_dict_body_raises(self, svc, monkeypatch):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: ["not", "a", "dict"],
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        assert exc_info.value.code == "api_error"
+
+    def test_ok_false_rate_limited(self, svc, monkeypatch):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: {
+                "ok": False,
+                "error": "Wallet has hit the 10 prepare/day cap.",
+                "code": "rate_limited",
+            },
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        assert exc_info.value.code == "rate_limited"
+
+    @pytest.mark.parametrize(
+        "code",
+        ["invalid_from", "invalid_name", "invalid_symbol", "missing_required", "invalid_burn"],
+    )
+    def test_ok_false_bad_request_codes(self, svc, monkeypatch, code):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: {"ok": False, "error": "boom", "code": code},
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        assert exc_info.value.code == "bad_request"
+
+    def test_ok_false_unknown_code_maps_to_api_error(self, svc, monkeypatch):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: {"ok": False, "error": "something", "code": "weird_code"},
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        assert exc_info.value.code == "api_error"
+
+    def test_ok_false_no_code_field(self, svc, monkeypatch):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: {"ok": False, "error": "no code"},
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        assert exc_info.value.code == "api_error"
+
+    def test_ok_false_no_error_field(self, svc, monkeypatch):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: {"ok": False, "code": "weird_code"},
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        assert "prepare_deploy failed" in exc_info.value.message
+
+
 class TestReads:
     def test_get_my_launches_requires_key(self, svc):
         svc.start()
@@ -530,7 +680,7 @@ class TestReads:
         assert exc_info.value.code == "no_credentials"
 
     def test_get_my_launches_calls_api(self, svc_with_key, monkeypatch):
-        def _get(url, headers, timeout):
+        def _get(url, params=None, headers=None, timeout=None):
             return {"launches": []}
 
         monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
@@ -545,7 +695,7 @@ class TestReads:
     def test_get_launch_calls_api(self, svc, monkeypatch):
         captured: list[str] = []
 
-        def _get(url, headers, timeout):
+        def _get(url, params=None, headers=None, timeout=None):
             captured.append(url)
             return {"token": "0xabc"}
 
@@ -558,7 +708,7 @@ class TestReads:
     def test_get_launch_unauthed_works_without_key(self, svc, monkeypatch):
         captured: list[dict] = []
 
-        def _get(url, headers, timeout):
+        def _get(url, params=None, headers=None, timeout=None):
             captured.append(headers)
             return {"token": "0xabc"}
 
@@ -714,7 +864,7 @@ class TestErrorReclassify:
     def test_get_reclassifies_too(self, svc_with_key, monkeypatch):
         exc = _HTTPErr(_FakeResponse(404, {"error": "no agent"}))
 
-        def _get(url, headers, timeout):
+        def _get(url, params=None, headers=None, timeout=None):
             raise exc
 
         monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
@@ -726,7 +876,7 @@ class TestErrorReclassify:
         class _Bare(Exception):
             pass
 
-        def _get(url, headers, timeout):
+        def _get(url, params=None, headers=None, timeout=None):
             raise _Bare("transport down")
 
         monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)

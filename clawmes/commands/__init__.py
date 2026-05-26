@@ -17,6 +17,7 @@ from clawmes.commands import (
     agent,
     allowlist,
     balance,
+    burn,
     buy,
     discovery,
     doctor,
@@ -65,6 +66,7 @@ def register_all(ctx) -> None:
     buy.register(ctx)
     trending.register(ctx)
     my_launches.register(ctx)
+    burn.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel
