@@ -29,7 +29,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from clawmes import __version__
 
@@ -115,7 +116,7 @@ _TOOL_FACTORIES: dict[str, Callable[[], Callable[..., str]]] = {
 }
 
 
-def _build_tool_list() -> list["Tool"]:
+def _build_tool_list() -> list[Tool]:
     """Reflect each exposed clawmes tool into an MCP ``Tool`` definition."""
     from mcp.types import Tool
 
@@ -163,7 +164,7 @@ def _call_tool(name: str, arguments: dict[str, Any] | None) -> str:
         )
 
 
-def _wrap_call_tool_result(result: str) -> list["TextContent"]:
+def _wrap_call_tool_result(result: str) -> list[TextContent]:
     """Wrap a clawmes tool's JSON-string output as MCP TextContent.
 
     Split out from the decorator-wrapped closure inside ``build_server``
@@ -175,25 +176,26 @@ def _wrap_call_tool_result(result: str) -> list["TextContent"]:
     return [TextContent(type="text", text=result)]
 
 
-def build_server() -> "Server":
+def build_server() -> Server:
     """Build the MCP Server object with clawmes tool handlers registered.
 
     Split out from :func:`main` so tests can drive the server in-process
     without running the stdio loop.
     """
-    from mcp.server.lowlevel import Server
-    from mcp.types import TextContent, Tool
+    from mcp.server.lowlevel import Server as _Server
+    from mcp.types import TextContent as _TextContent
+    from mcp.types import Tool as _Tool
 
-    server: Server = Server(name="clawmes", version=__version__)
+    server: _Server = _Server(name="clawmes", version=__version__)
 
     @server.list_tools()
-    async def _list_tools() -> list[Tool]:
+    async def _list_tools() -> list[_Tool]:
         return _build_tool_list()
 
     @server.call_tool()
     async def _call(  # pragma: no cover — exercised via stdio integration smoke test
         name: str, arguments: dict[str, Any] | None = None
-    ) -> list[TextContent]:
+    ) -> list[_TextContent]:
         return _wrap_call_tool_result(_call_tool(name, arguments))
 
     return server
