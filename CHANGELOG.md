@@ -6,6 +6,75 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.3.0 — 2026-05-26
+
+### Added — trading, discovery, burn-to-vault
+
+Three new top-level commands wire the basic buy / discover / list loop into chat, plus a new `/launch burn` subcommand for $CLAWNCH-backed vault allocations.
+
+- **`/buy <token> <eth_amount> [--clawnch | --all]`** — two-step swap
+  flow (quote → confirm) over the existing `defi_swap` tool. 0x
+  Permit2 single-signature execution. Symbol resolution via
+  DexScreener defaults to `--all` (broadest Base universe);
+  `--clawnch` restricts resolution to launchpad-deployed tokens via
+  `/api/launches?address=`. `0x`-prefixed addresses bypass symbol
+  resolution. `/buy confirm` / `/buy cancel` / `/buy status` round
+  out the per-sender draft surface.
+
+- **`/trending [--clawnch | --all] [limit]`** — top tokens on Base by
+  24h volume. Default `--all` pulls from DexScreener (broadest);
+  `--clawnch` queries `/api/tokens?sort=volume&prices=1` for
+  launchpad-only ranking. Limit clamped to `[1, 25]`.
+
+- **`/my_launches [--clawnch | --all]`** — list this user's launches.
+  Default `--clawnch` returns the agent's Clawnch-API launch history
+  via `GET /api/agents/me`. `--all` scans the connected wallet's
+  contract-creation transactions on Base via the Basescan API and
+  enriches each with DexScreener market data; tokens with no DEX
+  listing render as `(no DEX listing)`. Caps at 25 results.
+
+- **`/launch burn <amount | tx_hash>`** — claim a Clanker vault
+  allocation by burning $CLAWNCH. Integer amounts (e.g. `1000000`,
+  with optional `_` / `,` separators) sign + submit an ERC-20
+  `transfer(burn_address, amount * 1e18)` from the active wallet,
+  wait for the receipt, and store the hash in the launch draft.
+  Existing tx hashes (`0x` + 64 hex) are recorded verbatim. The
+  backend verifies the burn (sender, recipient, amount, 24h
+  pre-launch window) and applies the corresponding vault percentage
+  — 1k tokens allocated per 1 CLAWNCH burned, capped at 10% (10M
+  CLAWNCH). `/launch confirm` forwards the hash as `burnTxHash` to
+  `/api/deploy`.
+
+### Changed
+
+- `ClawnchService.deploy()` and `start_deploy()` now accept
+  `burn_tx_hash` alongside the existing `bypass_tx_hash`. They're
+  independent — both can be supplied on the same launch.
+- `get_bypass_recipient()` fallback bumped from `0.001 ETH` to
+  `0.005 ETH` to match the server-side `BYPASS_FEE_WEI` default that
+  shipped in the recent `clawnch` operational changes.
+- New `get_burn_config()` helper on `ClawnchService` exposes the
+  CLAWNCH token address, burn address, and minimum burn amount.
+  Override via `CLAWNCH_TOKEN_ADDRESS` / `CLAWNCH_BURN_ADDRESS` /
+  `CLAWNCH_MIN_BURN_TOKENS` env vars (staging / test).
+
+### Added — internals
+
+- `clawmes.lib.dexscreener` — stateless helper over the public
+  DexScreener HTTP API (`/latest/dex/search` and
+  `/latest/dex/tokens/<addr>`). Surfaces `search`, `find_token`,
+  `top_pairs`, and a compact `format_pair_summary` used by both
+  `/buy` and `/trending`. No auth, no service lifecycle — lives in
+  `lib/` not `services/`.
+- README expanded with a "Trading + discovery from chat" section and
+  updated launch flow including the burn curve.
+
+### Tests
+
+- +176 new tests covering dexscreener, /buy, /trending, /my_launches,
+  /launch burn, and the burn / bypass plumbing in `ClawnchService`.
+  Full suite 2859 passing at 100% coverage.
+
 ## 0.2.1 — 2026-05-22
 
 ### Added — launch metadata (image + socials)

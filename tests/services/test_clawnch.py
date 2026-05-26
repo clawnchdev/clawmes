@@ -201,6 +201,52 @@ class TestStartDeploy:
         )
         assert captured[0]["bypassTxHash"] == "0xdeadbeef"
 
+    def test_includes_burn_tx(self, svc_with_key, monkeypatch):
+        captured: list[dict] = []
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            captured.append(json)
+            return {
+                "challengeId": "cid",
+                "message": "m",
+                "nonce": "n",
+                "contractAddress": "0x42",
+                "storageSlot": "0x00",
+                "deadline": "2030",
+            }
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        svc_with_key.start_deploy(
+            token_params={"name": "x", "symbol": "X"},
+            burn_tx_hash="0xburn",
+        )
+        assert captured[0]["burnTxHash"] == "0xburn"
+        # No bypass key when bypass not requested.
+        assert "bypassTxHash" not in captured[0]
+
+    def test_burn_and_bypass_independent(self, svc_with_key, monkeypatch):
+        captured: list[dict] = []
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            captured.append(json)
+            return {
+                "challengeId": "cid",
+                "message": "m",
+                "nonce": "n",
+                "contractAddress": "0x42",
+                "storageSlot": "0x00",
+                "deadline": "2030",
+            }
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        svc_with_key.start_deploy(
+            token_params={"name": "x", "symbol": "X"},
+            bypass_tx_hash="0xbypass",
+            burn_tx_hash="0xburn",
+        )
+        assert captured[0]["bypassTxHash"] == "0xbypass"
+        assert captured[0]["burnTxHash"] == "0xburn"
+
 
 # ──────────────────────────────────────────────────────────────────────
 #  solve_challenge
@@ -434,6 +480,42 @@ class TestDeployConvenience:
         assert result["success"] is True
         assert result["tokenAddress"] == "0xtok"
 
+    def test_deploy_forwards_burn_tx(self, svc_with_key, monkeypatch):
+        # Deploy convenience must forward burn_tx_hash through start_deploy
+        # into the body of the /api/deploy POST.
+        captured: list[dict] = []
+        responses = [
+            {
+                "challengeId": "cid",
+                "message": "msg",
+                "nonce": "nonce",
+                "contractAddress": "0x4200000000000000000000000000000000000006",
+                "storageSlot": "0x00",
+                "deadline": "2030",
+            },
+            {"success": True, "txHash": "0xtx", "tokenAddress": "0xtok"},
+        ]
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            captured.append(json)
+            return responses.pop(0)
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        monkeypatch.setattr(
+            "clawmes.services.wallet.get_wallet_service",
+            lambda: _FakeWalletSvc(_FakeWalletMode()),
+        )
+        monkeypatch.setattr(
+            "clawmes.services.rpc.get_rpc_service",
+            lambda: _FakeRpc("0xff"),
+        )
+        svc_with_key.deploy(
+            token_params={"name": "x", "symbol": "X"},
+            burn_tx_hash="0xburn",
+        )
+        # First call is /api/deploy with the start_deploy body.
+        assert captured[0]["burnTxHash"] == "0xburn"
+
 
 # ──────────────────────────────────────────────────────────────────────
 #  reads
@@ -489,7 +571,8 @@ class TestReads:
     def test_get_bypass_recipient_default(self, svc):
         info = svc.get_bypass_recipient()
         assert info["recipient"].startswith("0x")
-        assert info["fee_eth"] == "0.001"
+        # Matches server-side default in api/lib/launch-bypass.ts.
+        assert info["fee_eth"] == "0.005"
 
     def test_get_bypass_recipient_env_override(self, monkeypatch, svc):
         monkeypatch.setenv("CLAWNCH_BYPASS_RECIPIENT", "0xabc")
@@ -497,6 +580,21 @@ class TestReads:
         info = svc.get_bypass_recipient()
         assert info["recipient"] == "0xabc"
         assert info["fee_eth"] == "0.01"
+
+    def test_get_burn_config_default(self, svc):
+        cfg = svc.get_burn_config()
+        assert cfg["token_address"].startswith("0x")
+        assert cfg["burn_address"].lower().endswith("dead")
+        assert cfg["min_burn_tokens"] == 1_000_000
+
+    def test_get_burn_config_env_override(self, monkeypatch, svc):
+        monkeypatch.setenv("CLAWNCH_TOKEN_ADDRESS", "0xtoken")
+        monkeypatch.setenv("CLAWNCH_BURN_ADDRESS", "0xburn")
+        monkeypatch.setenv("CLAWNCH_MIN_BURN_TOKENS", "500000")
+        cfg = svc.get_burn_config()
+        assert cfg["token_address"] == "0xtoken"
+        assert cfg["burn_address"] == "0xburn"
+        assert cfg["min_burn_tokens"] == 500000
 
 
 # ──────────────────────────────────────────────────────────────────────

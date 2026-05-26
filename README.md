@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-75 slash commands across 15 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+78 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,6 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
+| **Trading & discovery** (3) | `/buy` `/trending` `/my_launches` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -174,7 +175,18 @@ Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token fr
 
 Social handles get normalized (`mycoin` → `https://x.com/mycoin`); full URLs pass through unchanged. They're persisted to `tokenParams.metadata.socialMediaUrls` on the launchpad side and may render as badges on the launch detail page.
 
-Free-tier rate limit: 1 deploy per 24 hours per agent. To skip the cooldown, send `0.001 ETH` (or the current bypass amount) to the Clawnch bypass recipient on Base, then `/launch bypass <tx_hash>` and `/launch confirm`.
+Free-tier rate limit: 1 deploy per 24 hours per agent. To skip the cooldown, send `0.005 ETH` (or the current bypass amount) to the Clawnch bypass recipient on Base, then `/launch bypass <tx_hash>` and `/launch confirm`.
+
+To claim a vault allocation, burn $CLAWNCH within 24 hours of the launch:
+
+```
+/launch burn 1000000            # signs + submits a 1M CLAWNCH burn from the active wallet (= 1% vault)
+/launch burn 10000000           # max 10M CLAWNCH (= 10% vault, the Clanker maximum)
+/launch burn 0x<tx_hash>        # or paste a tx hash if you burned externally
+/launch confirm                 # deploy with vault allocation applied
+```
+
+Curve: 1k tokens allocated per 1 CLAWNCH burned (1M → 1%, 10M → 10%). Vault tokens are subject to the Clanker 7-day lockup. See [`api/lib/burn.ts`](https://github.com/clawnchdev/clawnch/blob/main/api/lib/burn.ts) for the exact verification rules.
 
 How the gate works:
 
@@ -184,6 +196,26 @@ How the gate works:
 → Clawnch's deployer wallet (server-side) pays gas and submits the underlying Clanker call
 
 Wallet signs only the off-chain captcha — Clawnch pays deploy gas. The `clawnch_launch` tool (LLM-callable) and `clawnch_fees` (read launches + fee accrual) follow the same path. See [`clawmes:clawnch-launch` skill](clawmes/skills/clawnch-launch/SKILL.md) for the LLM-facing surface.
+
+## Trading + discovery from chat
+
+After launching (or any time): three commands cover the basic loop of finding tokens and buying them.
+
+```
+/trending                          # top 10 tokens on Base by 24h volume (DexScreener)
+/trending --clawnch                # restrict to launchpad-deployed tokens
+/trending 25                       # bump the limit
+
+/buy MNEME 0.01                    # quote: resolves symbol via DexScreener
+/buy MNEME 0.01 --clawnch          # restrict resolution to Clawnch-launched tokens
+/buy 0x3FcD…7b07 0.01              # address bypasses symbol resolution
+/buy confirm                       # signs the Permit2 + submits via 0x
+
+/my_launches                       # tokens this agent deployed via Clawnch (default)
+/my_launches --all                 # any ERC-20 the connected wallet ever created on Base
+```
+
+`/buy` uses the existing `defi_swap` tool under the hood — 0x aggregator with Permit2 (single signature, no separate `approve` tx). The quote step always renders the resolved address before signing, so you can verify you're buying the right token. `--all` resolution returns the highest-volume Base pair for the symbol; `--clawnch` additionally verifies the address against the Clawnch launches table.
 
 ## Security
 
