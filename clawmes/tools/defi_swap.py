@@ -324,11 +324,18 @@ def _handle_swap(
             code="wallet_not_connected",
         )
 
+    # Append Coinbase builder code suffix on Base mainnet so the plugin
+    # earns builder rewards proportional to the swap volume it drives.
+    # No-op on other chains; safe to apply universally.
+    from clawmes.lib.base_builder import append_builder_code
+
+    final_data = append_builder_code(data, chain_id)
+
     try:
         tx_hash = mode.send_transaction(
             to=to,
             value=value,
-            data=data,
+            data=final_data,
             gas=gas if gas > 0 else None,
             chain_id=chain_id,
         )

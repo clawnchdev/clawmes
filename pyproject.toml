@@ -1,6 +1,6 @@
 [project]
 name = "clawmes"
-version = "0.4.0"
+version = "0.5.0"
 description = "Hermes Agent plugin for crypto: wallets, DEX trading, lending and staking, governance, on-chain automation."
 readme = "README.md"
 license = { text = "MIT" }
@@ -59,17 +59,36 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    # MCP SDK is in dev so tests/mcp_server/* can import it; the same
+    # SDK ships under the [mcp] extra for production use of the
+    # clawmes-mcp script entry.
+    "mcp>=1.0",
 ]
 test-network = [
     "responses>=0.25",
     "vcrpy>=6.0",
 ]
+# Optional: expose clawmes' read tools as an MCP server for desktop AI
+# clients (Claude Desktop, Cursor, ChatGPT). Install with:
+#   pip install clawmes[mcp]
+# Run with:
+#   clawmes-mcp
+mcp = [
+    "mcp>=1.0",
+]
 all = [
-    "clawmes[dev,test-network]",
+    "clawmes[dev,test-network,mcp]",
 ]
 
 [project.entry-points."hermes_agent.plugins"]
 clawmes = "clawmes"
+
+[project.scripts]
+# `clawmes-mcp` exposes clawmes' read tools to MCP-compatible clients
+# (Claude Desktop, Cursor, ChatGPT). Requires the [mcp] extra to be
+# installed; otherwise the import fails at runtime with a clear message
+# pointing the user at the install command.
+clawmes-mcp = "clawmes.mcp_server:main"
 
 [project.urls]
 Homepage = "https://clawnch.dev"

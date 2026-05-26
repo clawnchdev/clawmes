@@ -334,10 +334,15 @@ class TestSwap:
         details = out["details"]
         assert details["tx_hash"] == "0x" + "f" * 64
         assert details["router"] == "0x" + "1" * 40
-        # Mode received the calldata
+        # Mode received the calldata. On Base mainnet the Coinbase
+        # builder code suffix is appended; the original 0x calldata is
+        # the prefix.
         kwargs = fake_mode.send_transaction.call_args.kwargs
         assert kwargs["to"] == "0x" + "1" * 40
-        assert kwargs["data"] == "0xdeadbeef"
+        assert kwargs["data"].startswith("0xdeadbeef")
+        from clawmes.lib.base_builder import BASE_BUILDER_CODE
+
+        assert kwargs["data"].endswith(BASE_BUILDER_CODE[2:])
         assert kwargs["value"] == 0
 
     def test_swap_with_native_eth_value(self, connected, fake_zerox, fake_decimals, fake_mode):

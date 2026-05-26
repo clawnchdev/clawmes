@@ -6,6 +6,100 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.5.0 — 2026-05-26
+
+### Added — deep Base ecosystem integration
+
+A second batch of Base-specific surfaces. Most are small additive
+features; the big ones are Base Account wallet mode and shipping
+clawmes itself as an MCP server for desktop AI clients.
+
+- **Base Account wallet mode (`/connect_base`)** — fourth wallet mode
+  alongside WalletConnect / local-key / Bankr. Uses Coinbase's OAuth
+  2.1 + stored-request flow (same as Base MCP) so every Base App user
+  can connect their existing Coinbase Smart Wallet to clawmes without
+  needing to import a mnemonic or set up WalletConnect. Tx + signature
+  requests trigger an approval prompt in the user's Base App. Configure
+  via `CLAWMES_BASE_ACCOUNT_CLIENT_ID` after registering an OAuth client
+  on Coinbase Developer Platform.
+
+- **`clawmes-mcp` — clawmes as an MCP server** — desktop AI clients
+  (Claude Desktop, Cursor, ChatGPT, any MCP-compatible client) can
+  install clawmes directly and use its tools without going through
+  Hermes. Read-only subset for v1: `defi_price`, `defi_balance`,
+  `market_intel`, `clawnch_launch` (info), `clawnch_fees`,
+  `bv7x_oracle`, `bv7x_market`, `nft`, `block_explorer`, `cost_basis`.
+  Install with `pip install clawmes[mcp]`, run with `clawmes-mcp`,
+  configure in Claude Desktop's `claude_desktop_config.json` under
+  `mcpServers`.
+
+- **Coinbase builder code on every Base transaction** — clawmes appends
+  Coinbase's `BASE_BUILDER_CODE` suffix to swap, deploy, and burn
+  calldata on Base mainnet so the plugin earns builder rewards on
+  every on-chain action it drives. The clawnch backend already does
+  this server-side; this commit closes the gap for client-side txs.
+
+- **Basenames (.base.eth) resolution** — `/buy`, `/transfer`, `/send`
+  and any other command that takes an address now resolves
+  `jesse.base.eth`-style names natively against the Base L2 ENS
+  registry. Non-`.base.eth` ENS names continue to resolve against
+  Ethereum mainnet's canonical registry.
+
+- **`/launch check`** — pre-flight validation. Calls `/api/prepare/deploy`
+  to validate every param (name, symbol, burn tx) without committing
+  and shows the user what they'd get on confirm — most useful when
+  a `burn_tx_hash` is in the draft so the vault % gets verified
+  before paying gas.
+
+- **Base App deep links** — `/launch confirm` success messages now
+  include a `Base App: https://base.app/?token=…` link that opens
+  the new token in the user's Base App alongside the existing
+  Basescan + DexScreener URLs. URL pattern overridable via env.
+
+- **`/onramp [usd_amount]`** — generate a Coinbase Onramp link
+  pre-filled with the connected wallet's address. Removes the
+  "need ETH first" friction for new users. Configure via
+  `CLAWMES_COINBASE_ONRAMP_APP_ID` (Coinbase Developer Platform
+  app id); falls back to the generic landing page without it.
+
+- **x402 payment-required helpers (`clawmes.lib.x402`)** — minimal
+  client-side detection of HTTP 402 challenges per the x402 spec
+  (https://www.x402.org). Provides `is_x402_response`,
+  `parse_challenge`, and `format_challenge`. Foundation for future
+  paid-endpoint integrations; not wired into tools yet.
+
+### Changed
+
+- **`/launch confirm` non-custodial deploy** now also appends the
+  Coinbase builder code suffix to the prepared Clanker calldata
+  before submitting via the wallet. Custodial path was already
+  handled server-side.
+- **`/burn` + `/launch burn`** ERC-20 transfers append the builder
+  code suffix on Base. CLAWNCH burn-to-vault txs earn builder
+  rewards too.
+- **`active_mode`** on `WalletService` is consistently used as a
+  property (no parens) across all callers. Three call sites
+  (`/launch`'s non-custodial confirm, `/launch burn`, `/burn`)
+  were incorrectly calling it as a method; now fixed.
+
+### Tests
+
+- 137 new tests covering the new lib helpers, services, wallet
+  mode, commands, and MCP server. Full suite 3073 passing at
+  100% coverage. Ruff clean.
+
+### Notes
+
+- The `mcp` Python package is an optional dependency (`pip install
+  clawmes[mcp]`); the core install is unchanged. Without the extra
+  installed, the `clawmes-mcp` script entry will fail at runtime with
+  an import error pointing at the install command.
+- Base Account, Coinbase Onramp, and Base App deep-link production
+  endpoints can be overridden via env vars (`CLAWMES_BASE_ACCOUNT_*`,
+  `CLAWMES_COINBASE_ONRAMP_*`, `CLAWMES_BASE_APP_*_URL`) — the
+  defaults are best-effort against publicly-documented URLs that may
+  shift as the Base App / Coinbase Developer Platform mature.
+
 ## 0.4.0 — 2026-05-26
 
 ### Added — Base ecosystem integration

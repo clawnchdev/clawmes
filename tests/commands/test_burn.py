@@ -40,6 +40,7 @@ def fake_wallet(monkeypatch):
         def __init__(self, mode):
             self._mode = mode
 
+        @property
         def active_mode(self):
             return self._mode
 
@@ -145,6 +146,7 @@ class TestSubmit:
             return WalletState.for_chain(mode="local", address="0x" + "1" * 40, chain_id=8453)
 
         class _Svc:
+            @property
             def active_mode(self):
                 return None
 

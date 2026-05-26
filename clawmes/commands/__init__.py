@@ -27,6 +27,7 @@ from clawmes.commands import (
     launch,
     my_launches,
     onboarding,
+    onramp,
     plans,
     policy,
     trending,
@@ -67,6 +68,7 @@ def register_all(ctx) -> None:
     trending.register(ctx)
     my_launches.register(ctx)
     burn.register(ctx)
+    onramp.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel

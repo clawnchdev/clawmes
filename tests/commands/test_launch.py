@@ -379,6 +379,7 @@ class TestBurn:
 
         def _get_svc():
             class _S:
+                @property
                 def active_mode(self_inner):  # noqa: ARG002, N805
                     return _FakeMode()
 
@@ -418,6 +419,7 @@ class TestBurn:
             return WalletState.for_chain(mode="local", address="0x" + "1" * 40, chain_id=8453)
 
         class _Svc:
+            @property
             def active_mode(self):
                 return None
 
@@ -439,6 +441,7 @@ class TestBurn:
                 raise RuntimeError("rpc down")
 
         class _Svc:
+            @property
             def active_mode(self):
                 return _FakeMode()
 
@@ -580,6 +583,7 @@ class TestNonCustodialConfirm:
                 return state["tx_hash"]
 
         class _Svc:
+            @property
             def active_mode(self_inner):  # noqa: ARG002, N805
                 return _FakeMode() if not state.get("none_mode") else None
 
@@ -858,6 +862,128 @@ class TestExport:
 
 
 # ── /launch alerts ─────────────────────────────────────────────────
+
+
+class TestCheck:
+    """`/launch check` — pre-flight validation."""
+
+    @pytest.fixture
+    def fake_wallet_optional(self, monkeypatch):
+        from clawmes.services import wallet as ws_mod
+        from clawmes.wallet.state import WalletState
+
+        state: dict = {"connected": False, "address": "0x" + "1" * 40}
+
+        def _state():
+            if state["connected"]:
+                return WalletState.for_chain(mode="local", address=state["address"], chain_id=8453)
+            return WalletState.disconnected()
+
+        monkeypatch.setattr(ws_mod, "get_wallet_state", _state)
+        return state
+
+    @pytest.fixture
+    def fake_prepare_for_check(self, monkeypatch):
+        state: dict = {"raise": None, "return": None}
+
+        class _Svc:
+            def prepare_deploy(self_inner, **kwargs):  # noqa: ARG002, N805
+                if state["raise"]:
+                    raise state["raise"]
+                return state["return"] or {
+                    "ok": True,
+                    "data": {"to": "0xE85A", "data": "0xdf40", "value": "0x0", "chainId": 8453},
+                    "meta": {
+                        "platformFeeBps": 2000,
+                        "userFeeBps": 8000,
+                        "vaultPercentage": 0,
+                    },
+                }
+
+        import clawmes.services.clawnch as cl_mod
+
+        monkeypatch.setattr(cl_mod, "get_clawnch_service", lambda: _Svc())
+        return state
+
+    async def test_no_draft(self):
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "Check needs at minimum" in out
+
+    async def test_basic_check(self, fake_wallet_optional, fake_prepare_for_check):
+        fake_wallet_optional["connected"] = True
+        await launch_mod.handle_launch("name MyCoin", sender_id="alice")
+        await launch_mod.handle_launch("symbol MC", sender_id="alice")
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "Pre-flight OK" in out
+        assert "MyCoin" in out
+        assert "80% you / 20% Clawnch" in out
+        assert "Vault:      0%" in out
+
+    async def test_with_vault_percentage(self, fake_wallet_optional, fake_prepare_for_check):
+        fake_wallet_optional["connected"] = True
+        fake_prepare_for_check["return"] = {
+            "ok": True,
+            "data": {"to": "0xE85A", "data": "0xdf40", "value": "0x0", "chainId": 8453},
+            "meta": {
+                "platformFeeBps": 2000,
+                "userFeeBps": 8000,
+                "vaultPercentage": 5,
+            },
+        }
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "Vault:      5%" in out
+
+    async def test_burn_no_vault(self, fake_wallet_optional, fake_prepare_for_check):
+        # burn tx recorded on the draft but the meta returns 0% (e.g. burn was too small)
+        fake_wallet_optional["connected"] = True
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        launch_mod._log_state["alice"]["burn_tx_hash"] = "0x" + "a" * 64
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "produced no vault" in out
+
+    async def test_no_wallet_warning(self, fake_wallet_optional, fake_prepare_for_check):
+        fake_wallet_optional["connected"] = False
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "No wallet connected" in out
+
+    async def test_bad_request(self, fake_wallet_optional, fake_prepare_for_check):
+        fake_wallet_optional["connected"] = True
+        fake_prepare_for_check["raise"] = ClawnchError("bad_request", "bad name")
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "Check failed (bad_request)" in out
+        assert "re-run /launch check" in out
+
+    async def test_rate_limited(self, fake_wallet_optional, fake_prepare_for_check):
+        fake_wallet_optional["connected"] = True
+        fake_prepare_for_check["raise"] = ClawnchError("rate_limited", "cap hit")
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "rate_limited" in out
+        assert "00:00 UTC" in out
+
+    async def test_other_error(self, fake_wallet_optional, fake_prepare_for_check):
+        fake_wallet_optional["connected"] = True
+        fake_prepare_for_check["raise"] = ClawnchError("api_error", "down")
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "params look OK" in out
+
+    async def test_unexpected_error(self, fake_wallet_optional, fake_prepare_for_check):
+        fake_wallet_optional["connected"] = True
+        fake_prepare_for_check["raise"] = RuntimeError("boom")
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "Check failed" in out
 
 
 class TestAlerts:

@@ -106,6 +106,61 @@ async def handle_connect_bankr(raw_args: str) -> str:
     )
 
 
+async def handle_connect_base(raw_args: str) -> str:
+    """``/connect_base [code]`` — connect a Coinbase Smart Wallet / Base Account.
+
+    Two-step flow:
+
+      1. ``/connect_base`` (no args) — clawmes returns an OAuth
+         authorize URL. User visits it in a browser, completes
+         Coinbase OAuth, and copies the ``code`` query param from
+         the redirect URL.
+      2. ``/connect_base <code>`` — clawmes exchanges the code for
+         access + refresh tokens and finalizes the connection.
+
+    Every tx + signature thereafter triggers a stored-request approval
+    in the user's Base App, same UX as Base MCP.
+    """
+    from clawmes.services.base_account import BaseAccountError
+    from clawmes.services.wallet import get_wallet_service
+
+    svc = get_wallet_service()
+    code = raw_args.strip()
+
+    if not code:
+        try:
+            _state, auth_url = svc.connect_base_account()
+        except BaseAccountError as exc:
+            if exc.code == "not_configured":
+                return (
+                    "Base Account connect requires CLAWMES_BASE_ACCOUNT_CLIENT_ID. "
+                    "Register a Coinbase Developer Platform OAuth client at "
+                    "https://portal.cdp.coinbase.com and export the client id "
+                    "before /connect_base."
+                )
+            return f"Base Account connect failed: {exc.message}"
+        return (
+            "Base Account OAuth started. Open this URL in a browser:\n"
+            f"\n  {auth_url}\n\n"
+            "After approving, copy the `code` query param from the redirect URL "
+            "and run:\n"
+            "  /connect_base <code>"
+        )
+
+    try:
+        state = svc.complete_base_account(code)
+    except BaseAccountError as exc:
+        return f"Base Account code exchange failed ({exc.code}): {exc.message}"
+    return (
+        f"Base Account connected.\n"
+        f"  Address: {state.address}\n"
+        f"  Chain:   {state.chain_name}\n"
+        f"  Mode:    base_account (Coinbase Smart Wallet)\n"
+        "\n"
+        "Tx + signature requests will prompt for approval in your Base App."
+    )
+
+
 async def handle_disconnect(raw_args: str) -> str:
     from clawmes.services.wallet import get_wallet_service
 
@@ -120,6 +175,7 @@ async def handle_disconnect(raw_args: str) -> str:
         "walletconnect": "WalletConnect session",
         "local": "local-key session",
         "bankr": "Bankr session",
+        "base_account": "Base Account session",
     }.get(previous.mode or "", "wallet session")
     return f"Disconnected {mode_label} ({addr_short} on {chain})."
 
@@ -202,6 +258,12 @@ def register(ctx) -> None:
         name="connect_bankr",
         handler=handle_connect_bankr,
         description="Connect a Bankr custodial wallet",
+    )
+    ctx.register_command(
+        name="connect_base",
+        handler=handle_connect_base,
+        description="Connect a Coinbase Smart Wallet / Base Account via OAuth",
+        args_hint="[code]",
     )
     ctx.register_command(
         name="disconnect",
