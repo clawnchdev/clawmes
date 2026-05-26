@@ -22,14 +22,27 @@ class _FakeSvc:
         self.deploy_return: dict = {"txHash": "0xtx", "tokenAddress": "0xtok"}
         self.deploy_raise: Exception | None = None
 
-    def deploy(self, *, token_params, bypass_tx_hash=None):
-        self.deploys.append({"params": token_params, "bypass": bypass_tx_hash})
+    def deploy(self, *, token_params, bypass_tx_hash=None, burn_tx_hash=None):
+        self.deploys.append(
+            {
+                "params": token_params,
+                "bypass": bypass_tx_hash,
+                "burn": burn_tx_hash,
+            }
+        )
         if self.deploy_raise:
             raise self.deploy_raise
         return self.deploy_return
 
     def get_bypass_recipient(self):
-        return {"recipient": "0xbypass", "fee_eth": "0.001"}
+        return {"recipient": "0xbypass", "fee_eth": "0.005"}
+
+    def get_burn_config(self):
+        return {
+            "token_address": "0x" + "c" * 40,
+            "burn_address": "0x" + "d" * 40,
+            "min_burn_tokens": 1_000_000,
+        }
 
 
 @pytest.fixture
@@ -286,7 +299,7 @@ class TestConfirm:
         await launch_mod.handle_launch("symbol MC", sender_id="alice")
         out = await launch_mod.handle_launch("confirm", sender_id="alice")
         assert "0xbypass" in out
-        assert "0.001 ETH" in out
+        assert "0.005 ETH" in out
         assert "/launch bypass" in out
 
     async def test_other_clawnch_error(self, fake_svc):
@@ -312,6 +325,154 @@ class TestConfirm:
         await launch_mod.handle_launch("symbol MC", sender_id="alice")
         out = await launch_mod.handle_launch("confirm", sender_id="alice")
         assert "0xtx" in out
+
+
+class TestBurn:
+    async def test_burn_no_args_shows_usage(self):
+        out = await launch_mod.handle_launch("burn", sender_id="alice")
+        assert "Usage" in out
+        assert "1,000,000" in out
+
+    async def test_burn_tx_hash_recorded(self):
+        tx_hash = "0x" + "a" * 64
+        out = await launch_mod.handle_launch(f"burn {tx_hash}", sender_id="alice")
+        assert "Burn tx recorded" in out
+        assert launch_mod._log_state["alice"]["burn_tx_hash"] == tx_hash
+
+    async def test_burn_invalid_input(self):
+        out = await launch_mod.handle_launch("burn notanumber", sender_id="alice")
+        assert "Invalid burn input" in out
+
+    async def test_burn_amount_too_low(self):
+        out = await launch_mod.handle_launch("burn 500000", sender_id="alice")
+        assert "too low" in out
+        assert "1,000,000" in out
+
+    async def test_burn_underscores_and_commas_parse(self):
+        # Should parse "1_000_000" and "1,000,000" and "1000000" identically
+        out = await launch_mod.handle_launch("burn 1_000_000", sender_id="alice")
+        # Without a wallet mocked, the actual submit fails — but at least
+        # the parse succeeded (no "Invalid burn input" / "too low").
+        assert "Invalid" not in out
+        assert "too low" not in out
+
+    async def test_burn_amount_submits_via_wallet(self, monkeypatch, fake_svc):
+        from clawmes.commands import launch as launch_mod_inner
+        from clawmes.wallet.state import WalletState
+
+        captured = {}
+
+        class _FakeMode:
+            def send_transaction(self, **kwargs):
+                captured.update(kwargs)
+                return "0xburntx"
+
+        monkeypatch.setattr(
+            launch_mod_inner,
+            "_log_state",
+            launch_mod._log_state,
+        )
+
+        # Patch wallet
+        def _state():
+            return WalletState.for_chain(mode="local", address="0x" + "1" * 40, chain_id=8453)
+
+        def _get_svc():
+            class _S:
+                def active_mode(self_inner):  # noqa: ARG002, N805
+                    return _FakeMode()
+
+            return _S()
+
+        import clawmes.services.wallet as ws_mod
+
+        monkeypatch.setattr(ws_mod, "get_wallet_state", _state)
+        monkeypatch.setattr(ws_mod, "get_wallet_service", _get_svc)
+
+        out = await launch_mod.handle_launch("burn 1000000", sender_id="alice")
+        assert "Burn submitted" in out
+        assert "0xburntx" in out
+        assert launch_mod._log_state["alice"]["burn_tx_hash"] == "0xburntx"
+        assert launch_mod._log_state["alice"]["burn_amount"] == 1_000_000
+        # send_transaction got the right shape
+        assert captured["to"] == "0x" + "c" * 40
+        assert captured["value"] == 0
+        assert captured["chain_id"] == 8453
+
+    async def test_burn_amount_no_wallet_connected(self, monkeypatch, fake_svc):
+        from clawmes.wallet.state import WalletState
+
+        def _state():
+            return WalletState.disconnected()
+
+        import clawmes.services.wallet as ws_mod
+
+        monkeypatch.setattr(ws_mod, "get_wallet_state", _state)
+        out = await launch_mod.handle_launch("burn 1000000", sender_id="alice")
+        assert "No wallet connected" in out
+
+    async def test_burn_amount_no_active_mode(self, monkeypatch, fake_svc):
+        from clawmes.wallet.state import WalletState
+
+        def _state():
+            return WalletState.for_chain(mode="local", address="0x" + "1" * 40, chain_id=8453)
+
+        class _Svc:
+            def active_mode(self):
+                return None
+
+        import clawmes.services.wallet as ws_mod
+
+        monkeypatch.setattr(ws_mod, "get_wallet_state", _state)
+        monkeypatch.setattr(ws_mod, "get_wallet_service", lambda: _Svc())
+        out = await launch_mod.handle_launch("burn 1000000", sender_id="alice")
+        assert "No active wallet mode" in out
+
+    async def test_burn_send_tx_fails(self, monkeypatch, fake_svc):
+        from clawmes.wallet.state import WalletState
+
+        def _state():
+            return WalletState.for_chain(mode="local", address="0x" + "1" * 40, chain_id=8453)
+
+        class _FakeMode:
+            def send_transaction(self, **kwargs):  # noqa: ARG002
+                raise RuntimeError("rpc down")
+
+        class _Svc:
+            def active_mode(self):
+                return _FakeMode()
+
+        import clawmes.services.wallet as ws_mod
+
+        monkeypatch.setattr(ws_mod, "get_wallet_state", _state)
+        monkeypatch.setattr(ws_mod, "get_wallet_service", lambda: _Svc())
+        out = await launch_mod.handle_launch("burn 1000000", sender_id="alice")
+        assert "Burn tx submission failed" in out
+        assert "rpc down" in out
+
+
+class TestBurnPassesThroughToDeploy:
+    async def test_burn_tx_hash_forwarded_to_deploy(self, fake_svc):
+        tx_hash = "0x" + "a" * 64
+        await launch_mod.handle_launch("name MyCoin", sender_id="alice")
+        await launch_mod.handle_launch("symbol MC", sender_id="alice")
+        await launch_mod.handle_launch(f"burn {tx_hash}", sender_id="alice")
+        await launch_mod.handle_launch("confirm", sender_id="alice")
+        assert fake_svc.deploys[0]["burn"] == tx_hash
+
+
+class TestLooksLikeTxHash:
+    def test_valid(self):
+        assert launch_mod._looks_like_tx_hash("0x" + "a" * 64)
+
+    def test_wrong_prefix(self):
+        assert not launch_mod._looks_like_tx_hash("a" * 64)
+
+    def test_wrong_length(self):
+        assert not launch_mod._looks_like_tx_hash("0x" + "a" * 63)
+
+    def test_non_hex(self):
+        assert not launch_mod._looks_like_tx_hash("0x" + "z" * 64)
 
 
 class TestRegister:

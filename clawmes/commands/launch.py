@@ -199,6 +199,8 @@ async def handle_launch(raw_args: str, **kwargs: Any) -> str:
         else:
             draft["bypass_tx_hash"] = rest
             out = "Bypass tx recorded. Next: /launch confirm."
+    elif action == "burn":
+        out = await _handle_burn(sender_id, rest)
     elif action == "confirm":
         out = await _confirm(sender_id)
     else:
@@ -215,6 +217,7 @@ async def handle_launch(raw_args: str, **kwargs: Any) -> str:
             "  /launch farcaster <handle>    — Farcaster\n"
             "  /launch discord <url>         — Discord\n"
             "  /launch bypass <tx_hash>      — skip 24h cooldown\n"
+            "  /launch burn <amount|tx_hash> — burn $CLAWNCH for vault allocation\n"
             "  /launch status                — show current draft\n"
             "  /launch confirm               — deploy\n"
             "  /launch cancel                — clear draft"
@@ -242,6 +245,7 @@ def _render_usage(draft: dict[str, Any]) -> str:
         "",
         "Flow:",
         "  /launch bypass <tx_hash>         (skip 24h cooldown)",
+        "  /launch burn <amount|tx_hash>    (burn $CLAWNCH for vault allocation)",
         "  /launch status                   (show draft)",
         "  /launch confirm                  (deploy)",
         "  /launch cancel                   (clear draft)",
@@ -277,6 +281,100 @@ def _format_draft_lines(draft: dict[str, Any]) -> list[str]:
     return out
 
 
+async def _handle_burn(sender_id: str, rest: str) -> str:
+    """Handle ``/launch burn <amount|tx_hash>``.
+
+    Two input modes:
+
+      * ``tx_hash`` (``0x`` + 64 hex chars) — record verbatim. The user
+        has already done the burn off-band and just wants to provide
+        the hash for verification.
+
+      * ``amount`` (positive integer >= 1,000,000) — sign + submit a
+        $CLAWNCH ``transfer(burn_address, amount * 1e18)`` from the
+        active wallet, wait for the receipt, and store the resulting
+        tx hash on the draft. Saves the user from having to manually
+        construct the burn tx in their wallet UI.
+
+    Either way the draft ends up with ``burn_tx_hash`` set, which is
+    forwarded to the Clawnch ``/api/deploy`` endpoint on confirm.
+    Clawnch's backend verifies the burn (sender, recipient, amount,
+    timing) and applies the corresponding vault allocation.
+    """
+    draft = _get_draft(sender_id)
+    if not rest:
+        return (
+            "Usage: /launch burn <amount> | /launch burn <tx_hash>\n"
+            "  Amount: whole CLAWNCH (>= 1,000,000 for 1% vault, max 10,000,000 for 10%).\n"
+            "  Tx hash: 0x... if you already burned externally."
+        )
+
+    if _looks_like_tx_hash(rest):
+        draft["burn_tx_hash"] = rest
+        return "Burn tx recorded. Next: /launch confirm."
+
+    try:
+        amount = int(rest.replace("_", "").replace(",", ""))
+    except ValueError:
+        return f"Invalid burn input {rest!r}. Expected an amount (e.g. 1000000) or 0x tx hash."
+    if amount < 1_000_000:
+        return (
+            f"Burn amount too low: {amount:,} CLAWNCH (minimum 1,000,000 for 1% vault).\n"
+            "See https://clawn.ch/docs/burn for the vault curve."
+        )
+
+    return await _submit_burn(draft, amount)
+
+
+async def _submit_burn(draft: dict[str, Any], whole_tokens: int) -> str:
+    """Sign + submit the CLAWNCH burn tx via the active wallet."""
+    from clawmes.lib.abi import encode_transfer
+    from clawmes.services.clawnch import get_clawnch_service
+    from clawmes.services.wallet import get_wallet_service, get_wallet_state
+
+    state = get_wallet_state()
+    if not state.connected:
+        return "No wallet connected. Run /connect or /connect_local first."
+    mode = get_wallet_service().active_mode()
+    if mode is None:
+        return "No active wallet mode. Run /connect."
+
+    cfg = get_clawnch_service().get_burn_config()
+    token_addr = cfg["token_address"]
+    burn_addr = cfg["burn_address"]
+    amount_wei = whole_tokens * (10**18)
+    calldata = encode_transfer(burn_addr, amount_wei)
+
+    try:
+        tx_hash = mode.send_transaction(
+            to=token_addr,
+            value=0,
+            data=calldata,
+            chain_id=8453,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"Burn tx submission failed: {exc}"
+
+    draft["burn_tx_hash"] = tx_hash
+    draft["burn_amount"] = whole_tokens
+    return (
+        f"Burn submitted: {whole_tokens:,} CLAWNCH → {burn_addr}\n"
+        f"  Tx: {tx_hash}\n"
+        f"  Basescan: https://basescan.org/tx/{tx_hash}\n"
+        "Wait for confirmation, then /launch confirm to deploy with vault allocation."
+    )
+
+
+def _looks_like_tx_hash(value: str) -> bool:
+    """Heuristic: ``0x`` + 64 hex chars."""
+    if not value.startswith("0x"):
+        return False
+    body = value[2:]
+    if len(body) != 64:
+        return False
+    return all(c in "0123456789abcdefABCDEF" for c in body)
+
+
 async def _confirm(sender_id: str) -> str:
     draft = _get_draft(sender_id)
     name = draft.get("name")
@@ -301,6 +399,7 @@ async def _confirm(sender_id: str) -> str:
         }
 
     bypass = draft.get("bypass_tx_hash")
+    burn = draft.get("burn_tx_hash")
 
     try:
         from clawmes.services.clawnch import ClawnchError, get_clawnch_service
@@ -308,6 +407,7 @@ async def _confirm(sender_id: str) -> str:
         result = get_clawnch_service().deploy(
             token_params=token_params,
             bypass_tx_hash=bypass,
+            burn_tx_hash=burn,
         )
     except ClawnchError as exc:
         msg = f"Launch failed ({exc.code}): {exc.message}"

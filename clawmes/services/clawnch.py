@@ -154,6 +154,7 @@ class ClawnchService(Service):
         *,
         token_params: dict[str, Any],
         bypass_tx_hash: str | None = None,
+        burn_tx_hash: str | None = None,
     ) -> dict[str, Any]:
         """Start a token deploy. Returns the captcha challenge.
 
@@ -163,9 +164,15 @@ class ClawnchService(Service):
         attribution badge on /pad/.
 
         Pass ``bypass_tx_hash`` to skip the 24h rate limit — must be a
-        confirmed tx hash of >= 0.001 ETH sent to the bypass recipient
+        confirmed tx hash of >= 0.005 ETH sent to the bypass recipient
         address on Base (call :meth:`get_bypass_recipient` for the
-        current address).
+        current address + required fee).
+
+        Pass ``burn_tx_hash`` to claim a vault allocation by burning
+        $CLAWNCH — must be a confirmed tx hash of >= 1,000,000 CLAWNCH
+        sent to the burn address within the 24h pre-launch window. The
+        backend verifies the burn and applies the corresponding vault
+        percentage (1M = 1%, 10M = max 10%). See ``api/lib/burn.ts``.
         """
         self._require_key()
         if not token_params.get("name"):
@@ -177,6 +184,8 @@ class ClawnchService(Service):
         body: dict[str, Any] = {"tokenParams": stamped}
         if bypass_tx_hash:
             body["bypassTxHash"] = bypass_tx_hash
+        if burn_tx_hash:
+            body["burnTxHash"] = burn_tx_hash
         return self._post("/api/deploy", body, auth=True)
 
     # ── deploy: phase 2 (solve + confirm) ───────────────────────────
@@ -237,13 +246,20 @@ class ClawnchService(Service):
         *,
         token_params: dict[str, Any],
         bypass_tx_hash: str | None = None,
+        burn_tx_hash: str | None = None,
     ) -> dict[str, Any]:
         """End-to-end deploy convenience: challenge -> solve -> confirm.
 
         Returns the confirm response on success. Raises ``ClawnchError``
-        with a classified ``code`` on any step failure.
+        with a classified ``code`` on any step failure. ``burn_tx_hash``
+        claims a vault allocation; ``bypass_tx_hash`` skips the 24h
+        cooldown — they're independent and can both be supplied.
         """
-        challenge = self.start_deploy(token_params=token_params, bypass_tx_hash=bypass_tx_hash)
+        challenge = self.start_deploy(
+            token_params=token_params,
+            bypass_tx_hash=bypass_tx_hash,
+            burn_tx_hash=burn_tx_hash,
+        )
         solution = self.solve_challenge(challenge)
         return self.confirm_deploy(
             challenge_id=challenge["challengeId"],
@@ -282,7 +298,34 @@ class ClawnchService(Service):
                 "CLAWNCH_BYPASS_RECIPIENT",
                 "0xFC426DFeAe55Dae2f936a592450C9ECEa87A5736",
             ),
-            "fee_eth": os.environ.get("CLAWNCH_BYPASS_FEE_ETH", "0.001"),
+            "fee_eth": os.environ.get("CLAWNCH_BYPASS_FEE_ETH", "0.005"),
+        }
+
+    def get_burn_config(self) -> dict[str, Any]:
+        """Return the $CLAWNCH burn config used by ``/launch burn``.
+
+        Returns the token address (the CLAWNCH ERC-20), the burn
+        address (dead address — 0x…dEaD), and the minimum burn amount
+        in whole tokens. The frontend uses these to construct a
+        ``transfer(burn_address, amount * 1e18)`` calldata that the
+        active wallet signs.
+
+        Stable values today (override via env for staging):
+
+          * ``CLAWNCH_TOKEN_ADDRESS``    — default ``0xa1F724…747be``
+          * ``CLAWNCH_BURN_ADDRESS``     — default ``0x000…dEaD``
+          * ``CLAWNCH_MIN_BURN_TOKENS``  — default ``1_000_000`` (1% vault)
+        """
+        return {
+            "token_address": os.environ.get(
+                "CLAWNCH_TOKEN_ADDRESS",
+                "0xa1F72459dfA10BAD200Ac160eCd78C6b77a747be",
+            ),
+            "burn_address": os.environ.get(
+                "CLAWNCH_BURN_ADDRESS",
+                "0x000000000000000000000000000000000000dEaD",
+            ),
+            "min_burn_tokens": int(os.environ.get("CLAWNCH_MIN_BURN_TOKENS", "1000000")),
         }
 
     # ── internals: HTTP ─────────────────────────────────────────────

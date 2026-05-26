@@ -17,15 +17,18 @@ from clawmes.commands import (
     agent,
     allowlist,
     balance,
+    buy,
     discovery,
     doctor,
     evolve,
     identity,
     info,
     launch,
+    my_launches,
     onboarding,
     plans,
     policy,
+    trending,
     tx,
     wallet,
     wallet_recovery,
@@ -59,6 +62,9 @@ def register_all(ctx) -> None:
     bv7x_cmd.register(ctx)
     launch.register(ctx)
     agent.register(ctx)
+    buy.register(ctx)
+    trending.register(ctx)
+    my_launches.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel
