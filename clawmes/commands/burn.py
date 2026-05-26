@@ -150,7 +150,7 @@ async def _submit(sender_id: str, whole_tokens: int) -> str:
     state = get_wallet_state()
     if not state.connected:
         return "No wallet connected. Run /connect or /connect_local first."
-    mode = get_wallet_service().active_mode()
+    mode = get_wallet_service().active_mode
     if mode is None:
         return "No active wallet mode. Run /connect."
 
@@ -159,6 +159,11 @@ async def _submit(sender_id: str, whole_tokens: int) -> str:
     burn_addr = cfg["burn_address"]
     amount_wei = whole_tokens * (10**18)
     calldata = encode_transfer(burn_addr, amount_wei)
+
+    # Append Coinbase builder code suffix on Base mainnet.
+    from clawmes.lib.base_builder import append_builder_code
+
+    calldata = append_builder_code(calldata, 8453)
 
     try:
         tx_hash = mode.send_transaction(

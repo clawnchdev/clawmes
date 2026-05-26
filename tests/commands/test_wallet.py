@@ -468,7 +468,7 @@ class TestAddress:
 
 
 class TestRegister:
-    def test_registers_eight_commands(self):
+    def test_registers_nine_commands(self):
         recorded = []
 
         class FakeCtx:
@@ -481,6 +481,7 @@ class TestRegister:
             "connect",
             "connect_local",
             "connect_bankr",
+            "connect_base",
             "disconnect",
             "mode",
             "chain",
@@ -533,3 +534,96 @@ class TestConnectLocal:
         out = await wallet_cmd.handle_connect_local("hunter2")
         assert "Local wallet load failed" in out
         assert "no local keystore found" in out
+
+
+class TestConnectBase:
+    """``/connect_base`` — Coinbase Smart Wallet OAuth flow."""
+
+    @pytest.fixture
+    def _isolate_svc(self, monkeypatch):
+        from clawmes.services import base_account as ba_mod
+        from clawmes.services import wallet as wallet_svc
+
+        monkeypatch.setattr(ba_mod, "_instance", None)
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+
+    @pytest.mark.asyncio
+    async def test_no_args_starts_oauth_with_config(self, monkeypatch, _isolate_svc):
+        monkeypatch.setenv("CLAWMES_BASE_ACCOUNT_CLIENT_ID", "my-client")
+        out = await wallet_cmd.handle_connect_base("")
+        assert "Open this URL" in out
+        assert "client_id=my-client" in out
+
+    @pytest.mark.asyncio
+    async def test_no_args_not_configured(self, monkeypatch, _isolate_svc):
+        monkeypatch.delenv("CLAWMES_BASE_ACCOUNT_CLIENT_ID", raising=False)
+        out = await wallet_cmd.handle_connect_base("")
+        assert "CLAWMES_BASE_ACCOUNT_CLIENT_ID" in out
+        assert "Coinbase Developer Platform" in out
+
+    @pytest.mark.asyncio
+    async def test_code_exchange_no_prior_connect(self, monkeypatch, _isolate_svc):
+        monkeypatch.setenv("CLAWMES_BASE_ACCOUNT_CLIENT_ID", "my-client")
+        # Without a prior connect_base_account, the mode isn't active
+        out = await wallet_cmd.handle_connect_base("some_code")
+        assert "Base Account code exchange failed" in out
+
+    @pytest.mark.asyncio
+    async def test_code_exchange_happy_path(self, monkeypatch, _isolate_svc):
+        from clawmes.services import base_account as ba_mod
+
+        monkeypatch.setenv("CLAWMES_BASE_ACCOUNT_CLIENT_ID", "my-client")
+        # Stub the OAuth token exchange
+        monkeypatch.setattr(
+            ba_mod,
+            "http_post",
+            lambda *a, **k: {"access_token": "tok", "address": "0x" + "9" * 40},
+        )
+        # Step 1: initiate OAuth (no args)
+        await wallet_cmd.handle_connect_base("")
+        # Step 2: exchange code
+        out = await wallet_cmd.handle_connect_base("auth-code-from-redirect")
+        assert "Base Account connected" in out
+        assert "0x" + "9" * 40 in out
+        assert "Tx + signature requests" in out
+
+    @pytest.mark.asyncio
+    async def test_other_oauth_error(self, monkeypatch, _isolate_svc):
+        # Configure the env var so the first call succeeds, then inject
+        # an unrelated BaseAccountError on the first call instead of
+        # not_configured to hit the generic "connect failed" branch.
+        monkeypatch.setenv("CLAWMES_BASE_ACCOUNT_CLIENT_ID", "my-client")
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.services.base_account import BaseAccountError
+
+        def _boom(*a, **kw):
+            raise BaseAccountError("api_error", "something else broke")
+
+        # Patch the service convenience method to raise the non-config error
+        svc = wallet_svc.get_wallet_service()
+        monkeypatch.setattr(svc, "connect_base_account", _boom)
+        out = await wallet_cmd.handle_connect_base("")
+        assert "Base Account connect failed" in out
+        assert "something else broke" in out
+
+
+class TestDisconnectBaseAccount:
+    @pytest.mark.asyncio
+    async def test_renders_base_account_label(self, monkeypatch):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        # Fake an active base_account session that gets disconnected
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+
+        prior = WalletState(
+            connected=True,
+            mode="base_account",
+            address="0x" + "1" * 40,
+            chain_id=8453,
+            chain_name="base",
+        )
+        monkeypatch.setattr(svc, "disconnect", lambda: prior)
+        out = await wallet_cmd.handle_disconnect("")
+        assert "Base Account session" in out

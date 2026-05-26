@@ -31,6 +31,12 @@ _log = logger_for("lib.ens")
 # https://docs.ens.domains/contract-api-reference/ens — never moved.
 ENS_REGISTRY = "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e"
 
+#: Base ENS L2 Registry (Coinbase's L2 ENS deployment). Resolves
+#: ``*.base.eth`` names natively on Base L2 — bypasses the CCIP-Read
+#: hop that ``base.eth`` parent resolution on mainnet would require.
+#: Doc: https://docs.base.org/basenames
+BASE_ENS_REGISTRY = "0xB94704422c2A1E396835A571837Aa5AE53285a95"
+
 # Function selectors (first 4 bytes of keccak256 of the function signature).
 _SELECTOR_RESOLVER = bytes.fromhex("0178b8bf")  # resolver(bytes32)
 _SELECTOR_ADDR = bytes.fromhex("3b3b57de")  # addr(bytes32)
@@ -42,6 +48,9 @@ _ZERO_BYTES32 = "0x" + "0" * 64
 # wallet is currently on. Bridged ENS variants (e.g. on Base) exist but
 # the canonical resolver lives on mainnet.
 _ENS_CHAIN_ID = 1
+
+#: Base mainnet chain id for ``*.base.eth`` lookups.
+_BASE_CHAIN_ID = 8453
 
 
 class EnsError(RuntimeError):
@@ -88,8 +97,25 @@ def namehash(name: str) -> bytes:
     return keccak(namehash(rest) + keccak(label.encode("utf-8")))
 
 
+def is_basename(value: str) -> bool:
+    """Return True if ``value`` looks like a Coinbase Basename.
+
+    Basenames are subdomains of ``.base.eth`` (e.g. ``jesse.base.eth``).
+    They live on the Base L2 ENS registry rather than the Ethereum
+    mainnet registry; ``resolve()`` routes them automatically so most
+    callers don't need to branch on this.
+    """
+    return bool(value) and value.lower().endswith(".base.eth")
+
+
 def resolve(name: str) -> str:
-    """Resolve an ENS name to a checksummed 0x address on mainnet.
+    """Resolve an ENS name (or Basename) to a checksummed 0x address.
+
+    Detects ``*.base.eth`` names and routes the lookup to the Base L2
+    ENS registry. All other names go to Ethereum mainnet's canonical
+    ENS registry. The two registries share the same ABI so the
+    resolution algorithm is identical — only the registry contract
+    address and RPC chain id differ.
 
     Raises :class:`EnsError` with one of these codes:
 
@@ -97,15 +123,22 @@ def resolve(name: str) -> str:
       * ``no_address``     — the resolver returned the zero address.
       * ``rpc_error``      — the underlying RPC call failed.
     """
+    if is_basename(name):
+        registry = BASE_ENS_REGISTRY
+        chain_id = _BASE_CHAIN_ID
+    else:
+        registry = ENS_REGISTRY
+        chain_id = _ENS_CHAIN_ID
+
     rpc = get_rpc_service()
     node = namehash(name)
     node_hex = "0x" + node.hex()
 
     try:
         resolver_result = rpc.eth_call(
-            to=ENS_REGISTRY,
+            to=registry,
             data="0x" + (_SELECTOR_RESOLVER + node).hex(),
-            chain_id=_ENS_CHAIN_ID,
+            chain_id=chain_id,
         )
     except RpcError as exc:
         raise EnsError("rpc_error", f"ENS resolver lookup failed: {exc.message}") from exc
@@ -121,7 +154,7 @@ def resolve(name: str) -> str:
         addr_result = rpc.eth_call(
             to=resolver_addr,
             data="0x" + (_SELECTOR_ADDR + node).hex(),
-            chain_id=_ENS_CHAIN_ID,
+            chain_id=chain_id,
         )
     except RpcError as exc:
         raise EnsError("rpc_error", f"ENS addr lookup failed: {exc.message}") from exc

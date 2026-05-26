@@ -207,6 +207,8 @@ async def handle_launch(raw_args: str, **kwargs: Any) -> str:
         out = await _export(sender_id)
     elif action == "alerts":
         out = _render_alerts(rest)
+    elif action == "check":
+        out = await _check(sender_id)
     else:
         out = (
             f"Unknown /launch arg {action!r}. Use:\n"
@@ -227,6 +229,7 @@ async def handle_launch(raw_args: str, **kwargs: Any) -> str:
             "  /launch confirm --custodial   — deploy via Clawnch's custodial deployer\n"
             "  /launch export                — emit unsigned calldata for Base MCP / external signing\n"
             "  /launch alerts [source]       — subscribe to launch alerts (Telegram channel + filter docs)\n"
+            "  /launch check                 — pre-flight: validate params + burn, show vault %\n"
             "  /launch cancel                — clear draft"
         )
     _record("launch", raw_args, out)
@@ -344,7 +347,7 @@ async def _submit_burn(draft: dict[str, Any], whole_tokens: int) -> str:
     state = get_wallet_state()
     if not state.connected:
         return "No wallet connected. Run /connect or /connect_local first."
-    mode = get_wallet_service().active_mode()
+    mode = get_wallet_service().active_mode
     if mode is None:
         return "No active wallet mode. Run /connect."
 
@@ -353,6 +356,11 @@ async def _submit_burn(draft: dict[str, Any], whole_tokens: int) -> str:
     burn_addr = cfg["burn_address"]
     amount_wei = whole_tokens * (10**18)
     calldata = encode_transfer(burn_addr, amount_wei)
+
+    # Append Coinbase builder code suffix on Base mainnet.
+    from clawmes.lib.base_builder import append_builder_code
+
+    calldata = append_builder_code(calldata, 8453)
 
     try:
         tx_hash = mode.send_transaction(
@@ -514,14 +522,21 @@ async def _confirm_noncustodial(
     if not to_addr or not calldata:
         return f"Prepare returned an unexpected shape: {prepared!r}"
 
-    mode = get_wallet_service().active_mode()
+    mode = get_wallet_service().active_mode
     if mode is None:
         return "No active wallet mode. Run /connect."
+
+    # Append Coinbase builder code suffix on Base mainnet so the plugin
+    # earns builder rewards proportional to the deploy activity it drives.
+    from clawmes.lib.base_builder import append_builder_code
+
+    final_data = append_builder_code(calldata, chain_id)
+
     try:
         tx_hash = mode.send_transaction(
             to=to_addr,
             value=0,
-            data=calldata,
+            data=final_data,
             chain_id=chain_id,
         )
     except Exception as exc:  # noqa: BLE001
@@ -545,6 +560,8 @@ async def _confirm_noncustodial(
         pass
 
     _clear_draft(sender_id)
+    from clawmes.lib.base_app import token_url as _base_app_token_url
+
     lines = [
         f"Launched (non-custodial). {meta.get('platformFeeBps', 2000) / 100:.0f}% platform fee preserved.",
         f"  Tx: {tx_hash}",
@@ -553,6 +570,7 @@ async def _confirm_noncustodial(
     if token_address:
         lines.append(f"  Token: {token_address}")
         lines.append(f"  Chart: https://dexscreener.com/base/{token_address}")
+        lines.append(f"  Base App: {_base_app_token_url(token_address)}")
     vault_pct = meta.get("vaultPercentage") or 0
     if vault_pct:
         lines.append(f"  Vault: {vault_pct}% (Clanker lockup applies)")
@@ -602,11 +620,14 @@ async def _confirm_custodial(
         return f"Launch failed: {exc}"
 
     _clear_draft(sender_id)
+    from clawmes.lib.base_app import token_url as _base_app_token_url
+
     tx_hash = result.get("txHash") or result.get("tx_hash")
     token_address = result.get("tokenAddress") or result.get("token_address")
     lines = ["Launched (custodial)."]
     if token_address:
         lines.append(f"  Token: {token_address}")
+        lines.append(f"  Base App: {_base_app_token_url(token_address)}")
     if tx_hash:
         lines.append(f"  Tx: {tx_hash}")
         lines.append(f"  Chart: https://dexscreener.com/base/{token_address or tx_hash}")
@@ -669,6 +690,90 @@ def _render_alerts(rest: str) -> str:
                 "run /launch alerts <source> for client-side filter docs.",
             ]
         )
+    return "\n".join(lines)
+
+
+async def _check(sender_id: str) -> str:
+    """``/launch check`` — pre-flight validation of the current draft.
+
+    Calls ``/api/prepare/deploy`` to validate every parameter (name,
+    symbol, burn tx) without committing — the user sees exactly what
+    they'd get on confirm. Mostly useful when a ``burn_tx_hash`` is in
+    the draft: ``meta.vaultPercentage`` from the response confirms the
+    burn verified and shows the % the deploy will receive.
+
+    Counts against the per-wallet prepare rate limit (10/UTC day) the
+    same way a real confirm does — both endpoints use the same
+    underlying ``/api/prepare/deploy`` call.
+    """
+    draft = _get_draft(sender_id)
+    name = draft.get("name")
+    symbol = draft.get("symbol")
+    if not name or not symbol:
+        return (
+            "Check needs at minimum a name and a symbol. "
+            "Run /launch name <…> and /launch symbol <TICKER> first."
+        )
+
+    from clawmes.services.clawnch import ClawnchError, get_clawnch_service
+    from clawmes.services.wallet import get_wallet_state
+
+    state = get_wallet_state()
+    from_addr = state.address or "0x" + "0" * 40
+    socials = draft.get("socials") or {}
+    burn = draft.get("burn_tx_hash")
+
+    try:
+        prepared = get_clawnch_service().prepare_deploy(
+            from_address=from_addr,
+            name=name,
+            symbol=symbol,
+            description=draft.get("description") or None,
+            image=draft.get("image") or None,
+            twitter=socials.get("twitter"),
+            website=socials.get("website"),
+            telegram=socials.get("telegram"),
+            farcaster=socials.get("farcaster"),
+            discord=socials.get("discord"),
+            burn_tx_hash=burn,
+        )
+    except ClawnchError as exc:
+        # The whole point of `check` is to surface validation failures
+        # cleanly without running a half-baked deploy. Render the error
+        # as a checklist hint rather than a generic failure.
+        if exc.code == "bad_request":
+            hint = "Fix the param flagged below, then re-run /launch check."
+        elif exc.code == "rate_limited":
+            hint = "Per-wallet prepare limit reached (10/day). Try again after 00:00 UTC."
+        else:
+            hint = "Upstream check failed — params look OK on our side."
+        return f"Check failed ({exc.code}): {exc.message}\n\n{hint}"
+    except Exception as exc:  # noqa: BLE001
+        return f"Check failed: {exc}"
+
+    meta = prepared.get("meta") or {}
+    lines = [
+        "Pre-flight OK. This draft will deploy as:",
+        f"  Name:       {name}",
+        f"  Symbol:     {symbol}",
+        f"  Fees:       {meta.get('userFeeBps', 8000) / 100:.0f}% you / "
+        f"{meta.get('platformFeeBps', 2000) / 100:.0f}% Clawnch",
+    ]
+    vault_pct = meta.get("vaultPercentage") or 0
+    if vault_pct:
+        lines.append(f"  Vault:      {vault_pct}% (Clanker 7-day lockup applies)")
+    elif burn:
+        lines.append("  Vault:      0% — burn hash recorded but produced no vault %")
+    else:
+        lines.append("  Vault:      0% (no burn — /burn <amount> to claim)")
+    if not state.address:
+        lines.append("")
+        lines.append(
+            "⚠ No wallet connected — used the zero address for the pre-flight. "
+            "Connect a wallet before /launch confirm or the deploy will fail."
+        )
+    lines.append("")
+    lines.append("Run /launch confirm to deploy with these params, or edit then re-check.")
     return "\n".join(lines)
 
 

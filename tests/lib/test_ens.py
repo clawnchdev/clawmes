@@ -186,3 +186,35 @@ class TestResolve:
         monkeypatch.setattr(eth_utils, "to_checksum_address", bad_checksum)
         addr = resolve("vitalik.eth")
         assert addr == "0x" + "b" * 40
+
+    def test_basename_routes_to_base_l2(self, fake_rpc):
+        # .base.eth names should query the BASE_ENS_REGISTRY on chain 8453
+        from clawmes.lib.ens import BASE_ENS_REGISTRY
+
+        resolver = "0x" + "0" * 24 + "f" * 40
+        user_addr = "0x" + "0" * 24 + "c" * 40
+        fake_rpc.responses = [resolver, user_addr]
+        addr = resolve("jesse.base.eth")
+        # eth_utils returns mixed-case checksum — just verify it's the
+        # same underlying address (case-insensitive comparison).
+        assert addr.lower() == "0x" + "c" * 40
+        # Both eth_calls should hit Base mainnet (chain_id=8453) on the
+        # Base ENS Registry, not the Ethereum mainnet registry.
+        assert fake_rpc.calls[0]["chain_id"] == 8453
+        assert fake_rpc.calls[0]["to"] == BASE_ENS_REGISTRY
+        assert fake_rpc.calls[1]["chain_id"] == 8453
+
+
+class TestIsBasename:
+    def test_yes(self):
+        from clawmes.lib.ens import is_basename
+
+        assert is_basename("jesse.base.eth")
+        assert is_basename("JESSE.BASE.ETH")
+
+    def test_no(self):
+        from clawmes.lib.ens import is_basename
+
+        assert not is_basename("vitalik.eth")
+        assert not is_basename("foo.bar")
+        assert not is_basename("")

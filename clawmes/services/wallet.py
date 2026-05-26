@@ -203,6 +203,47 @@ class WalletService(Service):
             account_index=account_index,
         )
 
+    # --- Base Account convenience ---------------------------------------
+
+    def connect_base_account(self, *, chain_id: int = 8453) -> tuple[WalletState, str | None]:
+        """Materialize a :class:`BaseAccountMode` and start its OAuth flow.
+
+        Returns a ``(state, auth_url)`` tuple:
+
+          * ``state`` is the post-``connect()`` state — still
+            ``disconnected`` because OAuth runs out-of-band; the user
+            visits the URL, completes auth, and a follow-up call to
+            :meth:`complete_base_account` finalizes the connection.
+          * ``auth_url`` is the URL the user must visit. ``None`` if
+            the OAuth client isn't configured (the underlying service
+            raises ``BaseAccountError`` in that case).
+        """
+        from clawmes.wallet.base_account import BaseAccountMode
+
+        mode = BaseAccountMode()
+        self.set_mode(mode)
+        state = mode.connect(chain_id=chain_id)
+        return state, mode.get_pending_auth_url()
+
+    def complete_base_account(self, code: str, *, chain_id: int = 8453) -> WalletState:
+        """Finish the OAuth code exchange for an in-flight Base Account connect.
+
+        Raises if there's no in-flight Base Account mode (caller didn't
+        run :meth:`connect_base_account` first) or if the code is
+        invalid.
+        """
+        from clawmes.wallet.base_account import BaseAccountMode
+
+        active = self.active_mode
+        if not isinstance(active, BaseAccountMode):
+            from clawmes.services.base_account import BaseAccountError
+
+            raise BaseAccountError(
+                "not_connected",
+                "No in-flight Base Account session. Run /connect_base first to get an auth URL.",
+            )
+        return active.connect_with_code(code, chain_id=chain_id)
+
     # --- WalletConnect convenience --------------------------------------
 
     def connect_walletconnect(self) -> WalletState:

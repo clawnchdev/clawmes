@@ -68,18 +68,18 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-79 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+81 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
-| **Wallet** (8) | `/wallet` `/connect` `/connect_local` `/connect_bankr` `/disconnect` `/mode` `/chain` `/address` |
+| **Wallet** (9) | `/wallet` `/connect` `/connect_local` `/connect_bankr` `/connect_base` `/disconnect` `/mode` `/chain` `/address` |
 | **Wallet recovery** (4) | `/create_wallet` `/recover` `/export_wallet` `/wallet_backup` |
 | **Policy & safety** (5) | `/policy` `/policy_clear` `/safemode` `/dangermode` `/audit` |
 | **Transactions** (4) | `/tx` `/tx_search` `/tx_export` `/pending` |
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (4) | `/buy` `/trending` `/my_launches` `/burn` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault % |
+| **Trading & discovery** (5) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -250,6 +250,53 @@ After launching (or any time): three commands cover the basic loop of finding to
 ```
 
 `/buy` uses the existing `defi_swap` tool under the hood — 0x aggregator with Permit2 (single signature, no separate `approve` tx). The quote step always renders the resolved address before signing, so you can verify you're buying the right token. `--all` resolution returns the highest-volume Base pair for the symbol; `--clawnch` additionally verifies the address against the Clawnch launches table.
+
+## Base ecosystem integration
+
+clawmes is built around the Base network. v0.5.0 deepens that integration across four surfaces:
+
+### Coinbase Smart Wallet via `/connect_base`
+
+Connect your existing Base Account (the wallet you use in Base App) to clawmes via OAuth — same flow Base MCP uses:
+
+```
+/connect_base                       # emits an OAuth URL
+# visit the URL, approve in Coinbase, copy the `code` query param from the redirect
+/connect_base <code>                # finalizes the connection
+```
+
+Every tx + signature thereafter triggers an approval in your Base App, same UX as WalletConnect. No mnemonic to manage. Configure via `CLAWMES_BASE_ACCOUNT_CLIENT_ID` after registering an OAuth client on [Coinbase Developer Platform](https://portal.cdp.coinbase.com).
+
+### `clawmes-mcp` — use clawmes from desktop AI
+
+clawmes ships as a Model Context Protocol server in addition to the Hermes Agent plugin, so Claude Desktop / Cursor / ChatGPT / any MCP-compatible client can use its read tools directly:
+
+```
+pip install clawmes[mcp]
+clawmes-mcp                         # runs the stdio MCP server
+```
+
+Configure Claude Desktop's `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{ "mcpServers": { "clawmes": { "command": "clawmes-mcp" } } }
+```
+
+Read tools exposed in v0.5.0: `defi_price`, `defi_balance`, `market_intel`, `clawnch_launch` (info), `clawnch_fees`, `bv7x_oracle`, `bv7x_market`, `nft`, `block_explorer`, `cost_basis`. Write tools (swap / deploy / transfer) require a connected wallet that doesn't transfer cleanly into the MCP context — those land in a follow-up that delegates signing to Base MCP via `send_calls`.
+
+### Builder rewards on every clawmes swap + deploy
+
+Every clawmes-initiated transaction on Base mainnet automatically appends Coinbase's `BASE_BUILDER_CODE` suffix to the calldata, attributing the on-chain activity to Clawnch's builder ID. The EVM ignores trailing calldata beyond the ABI-decoded args, so it's a harmless ~28-byte suffix that earns builder rewards proportional to the volume the plugin drives.
+
+### Coinbase Onramp + Basenames + Base App deep links
+
+```
+/onramp 50                          # Coinbase Onramp link, $50 of ETH to your wallet
+/buy jesse.base.eth 0.01            # Basenames resolve natively against Base L2 ENS
+/launch confirm                     # success output includes a Base App deep link
+```
+
+`CLAWMES_COINBASE_ONRAMP_APP_ID` for production Onramp config; without it the command emits a generic Coinbase landing URL. Basename resolution is automatic — no flag needed. Base App URL pattern is overridable via `CLAWMES_BASE_APP_TOKEN_URL` if Coinbase's URL scheme shifts.
 
 ## Security
 
