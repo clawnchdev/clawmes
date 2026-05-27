@@ -50,7 +50,7 @@ class TestCopyPctValidation:
         monkeypatch.setattr(
             tg,
             "check_tier_or_error",
-            lambda *a, **k: "/copy --pct requires holding at least 10,000 $CLAWNCH.",
+            lambda *a, **k: "/copy --pct requires holding at least 10,000,000 $CLAWNCH.",
         )
         monkeypatch.setattr(copy, "_current_block_height", lambda: 1000)
         out = copy._cmd_add("u", ["0x" + "a" * 40, "0.001", "--pct", "50"])

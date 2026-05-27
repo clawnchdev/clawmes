@@ -342,7 +342,7 @@ Multi-step prompts join with `then` (bare commas would split numbers like `1,000
 
 `/alerts` is notification-only — no transactions submitted, no wallet required. Price alerts auto-deactivate after firing (so a crossing doesn't repeatedly notify on every subsequent tick). Wallet alerts stay active and re-fire on each new tx because `last_seen_block` advances past the seen receipt. `AlertsSchedulerService` polls on the registry cadence (~60s).
 
-**Token gating.** Power features in `/dca`, `/copy`, `/agent`, and `/alerts` unlock at the `HOLDER` tier — any wallet holding 10,000+ $CLAWNCH (~$0.10). Free tier still gets each feature with these caps:
+**Token gating.** Power features in `/dca`, `/copy`, `/agent`, and `/alerts` unlock at the `HOLDER` tier — any wallet holding 10,000,000+ $CLAWNCH (~$105 at session-time price). Free tier still gets each feature with these caps:
 - 1 active `/dca` schedule (HOLDER: unlimited + safeguard flags)
 - 1 active `/copy` follow (HOLDER: unlimited)
 - 3 active `/alerts` (HOLDER: unlimited)

@@ -74,15 +74,15 @@ class TestResolveTier:
         assert tier == token_gate.Tier.FREE
 
     def test_holder_above_threshold(self, monkeypatch):
-        # Mock balance reader to return 11k $CLAWNCH (above the 10k threshold).
-        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 11_000 * (10**18))
+        # Mock balance reader to return 11M $CLAWNCH (above the 10M threshold).
+        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 11_000_000 * (10**18))
         svc = token_gate.get_token_gate_service()
         tier, bal = svc.resolve_tier("0x" + "a" * 40)
         assert tier == token_gate.Tier.HOLDER
-        assert bal == 11_000 * (10**18)
+        assert bal == 11_000_000 * (10**18)
 
     def test_free_below_threshold(self, monkeypatch):
-        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 5_000 * (10**18))
+        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 5_000_000 * (10**18))
         svc = token_gate.get_token_gate_service()
         tier, _ = svc.resolve_tier("0x" + "a" * 40)
         assert tier == token_gate.Tier.FREE
@@ -92,7 +92,7 @@ class TestResolveTier:
 
         def _spy(_addr):
             calls["n"] += 1
-            return 11_000 * (10**18)
+            return 11_000_000 * (10**18)
 
         monkeypatch.setattr(token_gate, "_read_clawnch_balance", _spy)
         svc = token_gate.get_token_gate_service()
@@ -101,7 +101,7 @@ class TestResolveTier:
         assert calls["n"] == 1
 
     def test_invalidate_drops_cache(self, monkeypatch):
-        balances = iter([11_000 * (10**18), 9_000 * (10**18)])
+        balances = iter([11_000_000 * (10**18), 9_000_000 * (10**18)])
 
         def _read(_addr):
             return next(balances)
@@ -175,14 +175,14 @@ class TestCheckTierOrError:
 
     def test_holder_required_below_threshold(self, monkeypatch):
         monkeypatch.setattr(token_gate, "_active_wallet_address", lambda: "0x" + "a" * 40)
-        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 5_000 * (10**18))
+        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 5_000_000 * (10**18))
         out = token_gate.check_tier_or_error(token_gate.Tier.HOLDER, feature="thing")
-        assert "5,000 $CLAWNCH" in out
-        assert "5,000 more" in out
+        assert "5,000,000 $CLAWNCH" in out
+        assert "5,000,000 more" in out
 
     def test_holder_above_threshold_passes(self, monkeypatch):
         monkeypatch.setattr(token_gate, "_active_wallet_address", lambda: "0x" + "a" * 40)
-        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 50_000 * (10**18))
+        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 50_000_000 * (10**18))
         assert token_gate.check_tier_or_error(token_gate.Tier.HOLDER, feature="thing") is None
 
 
@@ -200,14 +200,14 @@ class TestCheckCapOrError:
 
     def test_at_cap_holder_passes(self, monkeypatch):
         monkeypatch.setattr(token_gate, "_active_wallet_address", lambda: "0x" + "a" * 40)
-        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 11_000 * (10**18))
+        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 11_000_000 * (10**18))
         assert token_gate.check_cap_or_error("dca", active_count=1, feature="schedule") is None
 
     def test_at_cap_free_blocked(self, monkeypatch):
         monkeypatch.setattr(token_gate, "_active_wallet_address", lambda: None)
         out = token_gate.check_cap_or_error("dca", active_count=1, feature="schedule")
         assert "Free tier allows 1 active schedule" in out
-        assert "10,000+ $CLAWNCH" in out
+        assert "10,000,000+ $CLAWNCH" in out
 
 
 # ── free_tier_cap ──────────────────────────────────────────────────

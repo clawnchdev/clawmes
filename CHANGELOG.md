@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.10.1 — 2026-05-27
+
+### Changed — HOLDER tier threshold raised 10k → 10M $CLAWNCH
+
+The token-gating threshold moves from 10,000 $CLAWNCH (~$0.10) to
+**10,000,000 $CLAWNCH** (~$105 at session-time price). The previous
+threshold was too low to function as a meaningful commitment signal —
+anyone could clear it for less than a coffee. The 10M threshold puts
+the HOLDER tier in the same conviction range as actually deploying a
+token through the launchpad (which requires the same 1M+ burn).
+
+What this changes:
+- Wallets between 10k–10M $CLAWNCH that were previously HOLDER tier
+  are now free tier. They still get every command, just with the
+  documented free-tier caps: 1 active `/dca`, 1 active `/copy`, 3
+  active `/alerts`, 1 active `/limit_order`, no `/dca` safeguard
+  flags, no `/copy --pct`, no `/agent` multi-step.
+- Existing schedules / follows / orders on those wallets keep
+  running. Caps only bite on the next `add` attempt.
+
+Why now: the gate exists to drive $CLAWNCH demand from clawmes power
+users. At 10k it was symbolic. At 10M it's signal.
+
+### Internal
+
+- `clawmes/services/token_gate.py`: `HOLDER_THRESHOLD = 10_000_000`.
+- Tests updated to use 5M / 11M / 50M values straddling the new
+  threshold.
+- 3831 tests pass at 100% coverage (unchanged).
+
 ## 0.10.0 — 2026-05-27
 
 ### Added — trader power-pack: `/portfolio` v2 + `/limit_order` + multi-wallet + `/copy --pct`
