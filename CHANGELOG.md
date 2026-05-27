@@ -6,6 +6,60 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.8.0 — 2026-05-27
+
+### Added — `/agent` natural-language plan compiler
+
+`/agent <prompt>` parses common trading-intent phrasings into a
+sequence of clawmes slash commands. Nothing materializes until the
+user explicitly says `/agent confirm` — the parsed plan lives per-
+sender in memory and is re-printable via `/agent show`.
+
+Architecture is deliberately minimal: regex-based intent parsing
+covers the high-frequency surface area, and any unparsed segment is
+called out by name so users see exactly what we missed (rather than
+silently truncating their prompt). An LLM-backed fallback can land as
+``/agent --ai <prompt>`` after we have telemetry on what people
+actually ask for.
+
+- **Surface:**
+  - `/agent <prompt>` — parse, store as draft, show plan.
+  - `/agent show` — re-print current draft.
+  - `/agent confirm` — execute every step in the draft, then clear.
+  - `/agent cancel` — discard draft.
+  - `/agent examples` — list supported phrasings.
+
+- **Recognized intents:**
+  - DCA: `DCA <amount> ETH of <token> every <interval>` and the
+    equivalent `buy ... every ...` phrasing.
+  - One-shot buy: `buy <amount> ETH of <token>`.
+  - Copy-trading: `copy <wallet>` / `follow <wallet> [at <amount> eth]`.
+  - LP fee claim: `claim my fees` / `claim all` / `claim <token>`.
+  - Burn: `burn <amount> [CLAWNCH]` (supports `1,000,000` or `1_000_000`).
+  - Leaderboard: `leaderboard`, `top tokens`, `top launchers`.
+  - Discovery: `show my launches`, `launches`, `balance`,
+    `what's my balance`.
+  - Multi-step: join with `then` (e.g.
+    `DCA 0.001 ETH of CLAWNCH every 1h then claim my fees`).
+
+- **Safety:**
+  - Bare commas are NOT segment separators (they appear inside
+    numbers like `1,000,000`). Use `then` for multi-step prompts.
+  - Drafts are in-memory only — a parse that goes stale across a
+    restart re-prompts rather than executing against state the user
+    can't see.
+  - `_dispatch_step` calls the matching `handle_*` function for each
+    step, so each command's own safeguards (e.g. `/dca` v2 caps,
+    `/buy` quote-then-confirm) apply downstream.
+
+### Internal
+
+- `clawmes/commands/agent_plan.py` (~330 lines). New file rather
+  than extending the existing `agent.py` (which is `/register_agent`
+  — different command, conflicting name otherwise).
+- 3513 tests pass at 100% coverage (was 3455). README command count:
+  85 → 86.
+
 ## 0.7.0 — 2026-05-27
 
 ### Added — `/copy` copy-trading
