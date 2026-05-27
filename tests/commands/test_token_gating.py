@@ -60,7 +60,7 @@ class TestDcaSafeguardGate:
         monkeypatch.setattr(
             tg,
             "check_tier_or_error",
-            lambda *a, **k: "feature requires holding at least 10,000 $CLAWNCH.",
+            lambda *a, **k: "feature requires holding at least 10,000,000 $CLAWNCH.",
         )
         out = dca._cmd_add("u", ["0x" + "a" * 40, "0.01", "1h", "--slippage", "50"])
         assert "requires holding at least" in out
@@ -109,7 +109,7 @@ class TestAgentMultiStepGate:
         monkeypatch.setattr(
             tg,
             "check_tier_or_error",
-            lambda *a, **k: "/agent multi-step requires holding at least 10,000 $CLAWNCH.",
+            lambda *a, **k: "/agent multi-step requires holding at least 10,000,000 $CLAWNCH.",
         )
         out = agent_plan._cmd_parse("u", "claim my fees then burn 1000000")
         assert "requires holding" in out

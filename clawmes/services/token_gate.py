@@ -9,20 +9,20 @@ Two tiers in v1:
     schedule, 1 active ``/copy`` follow, 3 active ``/alerts``, no
     safeguard flags on ``/dca``.
 
-  * ``holder`` — any wallet holding **at least 10,000 $CLAWNCH**
-    (~$0.10 at session-time price). Unlocks:
+  * ``holder`` — any wallet holding **at least 10,000,000 $CLAWNCH**
+    (~$105 at session-time price). Unlocks:
       - Unlimited ``/dca`` schedules + safeguard flags (slippage,
         daily-cap, max-total, max-failures)
       - Unlimited ``/copy`` follows + advanced flags (blocklist, etc.)
       - ``/agent`` multi-step prompts (``then`` chains)
       - Unlimited ``/alerts``
 
-The gate is intentionally minimal: a single 10k threshold rather than
-a 4-tier ladder. Easy to reason about, easy to test, low barrier to
-becoming a holder so nobody who actually wants the power features is
-priced out. Threshold is reviewable in one place
-(:data:`HOLDER_THRESHOLD_WEI`) so we can adjust as the price moves
-without scattering magic numbers.
+The gate is intentionally minimal: a single 10M threshold rather than
+a 4-tier ladder. Easy to reason about, easy to test. The threshold
+is meaningful enough to signal real commitment to the ecosystem
+without being prohibitively expensive for serious users. Reviewable
+in one place (:data:`HOLDER_THRESHOLD_WEI`) so we can adjust as the
+price moves without scattering magic numbers.
 
 Implementation: each gated command imports
 :func:`check_tier_or_error` and calls it before touching state. The
@@ -49,11 +49,11 @@ _log = logger_for("services.token_gate")
 # as a tuple/list here and a "highest tier across all" resolution.
 CLAWNCH_ADDR = "0xa1F72459dfA10BAD200Ac160eCd78C6b77a747be"
 
-# Holder threshold: 10,000 $CLAWNCH at 18 decimals = 1e22 wei.
-# At session-time price of ~$0.0000105 / $CLAWNCH, this is ~$0.10 USD —
-# small enough to be aspirational for any actual user, large enough to
-# function as a real signal of "I'm in this ecosystem."
-HOLDER_THRESHOLD = 10_000
+# Holder threshold: 10,000,000 $CLAWNCH at 18 decimals = 1e25 wei.
+# At session-time price of ~$0.0000105 / $CLAWNCH, this is ~$105 USD —
+# meaningful enough to function as a real signal of commitment to the
+# ecosystem, accessible enough that any serious user can clear it.
+HOLDER_THRESHOLD = 10_000_000
 HOLDER_THRESHOLD_WEI = HOLDER_THRESHOLD * (10**18)
 
 # Cache TTL — balance reads hit the RPC, which is slow + rate-limited.
