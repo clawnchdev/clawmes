@@ -44,6 +44,7 @@ def start_all() -> None:
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.command_history import get_command_history_service
     from clawmes.services.credential_redactor import get_credential_redactor
+    from clawmes.services.dca_scheduler import get_dca_scheduler_service
     from clawmes.services.endpoint_allowlist import get_endpoint_allowlist_service
     from clawmes.services.evolution_mode import get_evolution_mode_service
     from clawmes.services.explorer import get_explorer_service
@@ -126,6 +127,10 @@ def start_all() -> None:
         get_opengateway_service,
         # 7. Background daemons — last so they pick up everything above.
         get_scheduler,  # ticking=True; needs cron driver to actually fire
+        # 7a. DCA scheduler — ticking=True. Fires due /dca schedules on
+        #     the registry cadence (60s by default). Sync execution path;
+        #     per-schedule errors caught + logged.
+        get_dca_scheduler_service,
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs
     ]
     for factory in factories:

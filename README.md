@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 84 commands. 23 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 84 commands. 24 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -265,17 +265,26 @@ After launching (or any time): three commands cover the basic loop of finding to
 /claim all                         # sweep every launch you own — one tx per token
 
 /dca add 0xa1F7…747be 0.001 1h     # buy 0.001 ETH of CLAWNCH every hour
-/dca list                          # show all your schedules + next run time
+/dca add 0x… 0.01 4h --slippage 50 --daily-cap 0.05 --max-total 1 --max-failures 5
+                                   # full safeguard set on a single schedule
+/dca list                          # show your schedules + next run time
+/dca edit dca_abc 0xabc eth_amount 0.02
+                                   # change one field (token, eth_amount, interval,
+                                   # slippage_bps, daily_cap_eth, max_eth_total,
+                                   # max_consecutive_failures)
+/dca skip dca_abc123               # advance next run, no execution this round
+/dca dry-run dca_abc123            # preview swap output, no submission
+/dca status                        # global summary + service health
 /dca pause dca_abc123              # suspend without removing
 /dca resume dca_abc123             # re-arm
 /dca cancel dca_abc123             # delete
 /dca history dca_abc123            # past executions for a schedule
-/dca tick                          # run any due schedules (cron-callable, idempotent)
+/dca tick                          # manually execute due schedules (testing/debug)
 ```
 
 - `/leaderboard` hits `/api/tokens?sort=volume` + `/api/launches` and aggregates client-side. No new server-side endpoints required.
 - `/claim` calls Clanker v4's `collectRewards(address)` on the LP Locker Fee Conversion contract (`0x63D2DfEA…14d93496`). The locker pays out to every recipient slot per token in one shot — caller pays gas, the slot allocations get distributed to the rewardRecipients on that position. Each tx emits a `ClaimedRewards` event with per-recipient `(amount0, amount1)` arrays.
-- `/dca` schedules persist in `${HERMES_HOME}/clawmes/dca/schedules.json`. Interval grammar: `1m`, `30m`, `1h`, `4h`, `1d`, `1w` (1m floor, 1y ceiling). `/dca tick` is idempotent — only fires schedules whose `next_run_epoch` has passed, advances each schedule once per tick regardless of swap success/failure, so transient errors don't cascade into retry storms. Wire the tick into Hermes cron once you've set up schedules.
+- `/dca` schedules persist in `${HERMES_HOME}/clawmes/dca/schedules.json`. Interval grammar: `1m`, `30m`, `1h`, `4h`, `1d`, `1w` (1m floor, 1y ceiling). The `DcaSchedulerService` ticks automatically on the registry cadence — no manual cron wiring needed. Safeguards (slippage, daily-cap, max-total, max-failures) attach per-schedule; the `max-failures` counter auto-pauses runaway schedules so a broken swap path can't burn gas in a loop. `/dca tick` is preserved as a synchronous testing entrypoint.
 
 ## Base ecosystem integration
 

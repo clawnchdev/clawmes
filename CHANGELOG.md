@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.6.1 — 2026-05-27
+
+### Added — `/dca` v2: auto-scheduler, safeguards, new subcommands
+
+`/dca` graduates from a manual cron-curio to a real "set it and
+forget it" feature.
+
+- **Auto-scheduler** — new `DcaSchedulerService` (id
+  `clawmes.dca_scheduler`) ticks on the registry cadence (every ~60s
+  by default, driven by Hermes cron) and dispatches every due
+  schedule. The manual `/dca tick` subcommand is preserved for
+  testing and edge-case use. Per-schedule failures are caught
+  internally so one bad token cannot stall the loop.
+
+- **Safeguards** — every schedule gets four new optional caps:
+  - `--slippage <bps>` (default 100 = 1%) — passed through to
+    `defi_swap` on each execution.
+  - `--daily-cap <eth>` — skips the run if executing it would push
+    24h spend over the cap. Old runs (>24h ago) and non-`ok` runs are
+    excluded from the window.
+  - `--max-total <eth>` — auto-pauses the schedule once lifetime
+    spend hits the cap.
+  - `--max-failures <n>` (default 3) — auto-pauses after N
+    consecutive failures (`error`, `no_wallet`, `daily_capped`, or
+    `total_capped`) so a misconfigured schedule can't drain gas.
+
+- **New subcommands:**
+  - `/dca edit <id> <field> <value>` — change any field on an
+    existing schedule. Editable fields: `token`, `eth_amount`,
+    `interval`, `slippage_bps`, `daily_cap_eth`, `max_eth_total`,
+    `max_consecutive_failures`. Caps accept `none` to clear.
+  - `/dca skip <id>` — bump `next_run_epoch` by the interval without
+    executing. Useful when you know a run would fail (e.g., wallet
+    deliberately offline) and want to keep the cadence.
+  - `/dca dry-run <id>` — quote the swap via `defi_swap` (action
+    `quote`) without submitting. Returns the expected buy amount.
+  - `/dca status` — global summary across all senders, plus the
+    scheduler service's tick + run counters.
+
+### Internal
+
+- `_execute` refactored to `_execute_sync` (no actual `await` needed
+  — wallet + swap calls were already sync). The async `/dca tick`
+  command now delegates to `_run_due_with_lines()` which both surfaces
+  return.
+- 3318 tests pass at 100% coverage (was 3231).
+- `clawmes/services/dca_scheduler.py` added (`DcaSchedulerService`).
+- README service count: 23 → 24.
+
 ## 0.6.0 — 2026-05-27
 
 ### Added — leaderboards, fee claiming, dollar-cost averaging
