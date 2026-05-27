@@ -183,8 +183,10 @@ def _render_usage() -> str:
         "  /copy add <wallet> <eth_per_copy>\n"
         "      [--slippage <bps>] [--daily-cap <eth>]\n"
         "      [--max-total <eth>] [--max-failures <n>]\n"
-        "      [--blocklist <0xa,0xb,…>]\n"
-        "                          Follow a wallet's buys\n"
+        "      [--blocklist <0xa,0xb,…>] [--pct <N>]\n"
+        "                          Follow a wallet's buys. --pct scales each\n"
+        "                          copy to N%% of target's outgoing ETH,\n"
+        "                          capped at <eth_per_copy>. (HOLDER tier)\n"
         "  /copy list              Show your follows + last activity\n"
         "  /copy pause <id>        Suspend without losing state\n"
         "  /copy resume <id>       Re-arm a paused follow\n"
@@ -275,6 +277,25 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         if max_failures < 1:
             return f"--max-failures must be >= 1 (got {max_failures})."
 
+    # Percentage-based sizing: when set, the per-copy ETH amount is
+    # scaled to ``pct%`` of the target wallet's outgoing ETH on each
+    # detected buy. ``eth_per_copy`` becomes the FLOOR (and used as
+    # fallback when we can't read the target tx's ETH value). A holder-
+    # tier feature; free tier sticks to the fixed amount.
+    pct: float | None = None
+    if "pct" in flags:
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        gate_err = check_tier_or_error(Tier.HOLDER, feature="/copy --pct percentage sizing")
+        if gate_err:
+            return gate_err
+        try:
+            pct = float(flags["pct"])
+        except ValueError:
+            return f"--pct must be a number (got {flags['pct']!r})."
+        if pct <= 0 or pct > 1000:
+            return f"--pct must be between 0 and 1000 (got {pct})."
+
     blocklist = _parse_blocklist(flags.get("blocklist", ""))
 
     # Seed last_seen_block from the current chain head. We default to a
@@ -292,6 +313,7 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         "sender_id": sender_id,
         "wallet": wallet.lower(),
         "eth_per_copy": eth_per_copy,
+        "pct": pct,
         "slippage_bps": slippage_bps,
         "daily_cap_eth": daily_cap_eth,
         "max_eth_total": max_eth_total,
@@ -306,11 +328,15 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
     state["follows"].append(follow)
     _save_state(state)
 
+    pct_line = f"  Pct sizing:  {pct}% of target tx\n" if pct is not None else ""
     return (
         f"Follow added: {follow_id}\n"
         f"  Wallet:      {wallet}\n"
-        f"  Per copy:    {eth_per_copy} ETH\n"
-        f"  Slippage:    {slippage_bps} bps\n"
+        f"  Per copy:    {eth_per_copy} ETH"
+        + (" (floor)" if pct is not None else "")
+        + "\n"
+        + pct_line
+        + f"  Slippage:    {slippage_bps} bps\n"
         f"  Daily cap:   {daily_cap_eth if daily_cap_eth is not None else 'none'}\n"
         f"  Total cap:   {max_eth_total if max_eth_total is not None else 'none'}\n"
         f"  Max fails:   {max_failures}\n"
@@ -524,19 +550,23 @@ def _process_follow(follow: dict[str, Any], lines: list[str]) -> int:
             )
             continue
 
-        result = _execute_copy(follow, token)
+        # Compute the actual ETH amount for THIS copy. With --pct set,
+        # scale to the target wallet's outgoing ETH on the seen tx,
+        # capped at the configured eth_per_copy. Without --pct, the
+        # configured eth_per_copy is used as-is.
+        eth_for_copy = _compute_copy_amount(follow, tx)
+        result = _execute_copy(follow, token, eth_amount=eth_for_copy)
         follow["executions"].append(
             {
                 "at": _now_iso(),
                 "tx_seen": tx.get("hash", ""),
                 "token": token,
+                "eth_amount": eth_for_copy,
                 "result": result,
             }
         )
         if result.get("status") == "ok":
-            follow["total_eth_spent"] = float(follow.get("total_eth_spent", 0.0)) + float(
-                follow["eth_per_copy"]
-            )
+            follow["total_eth_spent"] = float(follow.get("total_eth_spent", 0.0)) + eth_for_copy
             count += 1
         lines.append(
             f"  {follow['id']}  {result.get('status')}  {_short(token)}  {result.get('detail', '')}"
@@ -577,9 +607,81 @@ def _spend_in_last_24h(follow: dict[str, Any]) -> float:
     return total
 
 
-def _execute_copy(follow: dict[str, Any], token: str) -> dict[str, Any]:
-    """Submit one copy buy. Same safeguard order as /dca v2."""
-    eth_amount = float(follow.get("eth_per_copy", 0.0))
+def _compute_copy_amount(follow: dict[str, Any], tx: dict[str, Any]) -> float:
+    """Resolve the actual ETH amount for one copy.
+
+    Default: ``follow["eth_per_copy"]`` — fixed sizing.
+
+    With ``pct`` set: scale to the target wallet's outgoing ETH on the
+    seen tx (looked up via ``eth_getTransactionByHash``), capped at
+    ``eth_per_copy`` so a whale's huge buy can't drain the follower's
+    wallet. Falls back to fixed sizing when the target tx had no ETH
+    value (e.g., token-token swap) or when the lookup fails.
+    """
+    base = float(follow.get("eth_per_copy", 0.0))
+    pct = follow.get("pct")
+    if pct is None:
+        return base
+    tx_hash = tx.get("hash", "")
+    if not tx_hash:
+        return base
+    target_eth_wei = _get_tx_eth_value(tx_hash)
+    if target_eth_wei <= 0:
+        return base
+    target_eth = target_eth_wei / 1e18
+    scaled = target_eth * (float(pct) / 100.0)
+    # Cap at eth_per_copy so a whale's huge buy is bounded.
+    return min(scaled, base)
+
+
+def _get_tx_eth_value(tx_hash: str) -> int:
+    """Read the ``value`` field (wei) of a tx via Basescan's proxy endpoint.
+
+    Returns ``0`` on any error — the caller treats 0 as "fall back to
+    fixed sizing." Cached implicitly by Basescan's CDN; we don't add
+    a clawmes-side cache because the per-tick cap of 20 copies already
+    bounds the call rate.
+    """
+    params = {
+        "module": "proxy",
+        "action": "eth_getTransactionByHash",
+        "txhash": tx_hash,
+    }
+    api_key = os.environ.get("BASESCAN_API_KEY")
+    if api_key:
+        params["apikey"] = api_key
+    try:
+        body = http_get(_BASESCAN_BASE, params=params, timeout=10.0)
+    except Exception:  # noqa: BLE001
+        return 0
+    if not isinstance(body, dict):
+        return 0
+    result = body.get("result")
+    if not isinstance(result, dict):
+        return 0
+    value = result.get("value")
+    if not isinstance(value, str) or not value.startswith("0x"):
+        return 0
+    try:
+        return int(value, 16)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _execute_copy(
+    follow: dict[str, Any], token: str, *, eth_amount: float | None = None
+) -> dict[str, Any]:
+    """Submit one copy buy. Same safeguard order as /dca v2.
+
+    ``eth_amount`` defaults to ``follow["eth_per_copy"]`` when omitted —
+    the manual ``/copy tick`` path passes nothing. Callers using
+    percentage-based sizing (``--pct``) precompute the amount and pass
+    it explicitly via ``_compute_copy_amount``.
+    """
+    if eth_amount is None:
+        eth_amount = float(follow.get("eth_per_copy", 0.0))
+    else:
+        eth_amount = float(eth_amount)
 
     max_total = follow.get("max_eth_total")
     if max_total is not None:

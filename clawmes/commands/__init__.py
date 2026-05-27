@@ -31,6 +31,7 @@ from clawmes.commands import (
     info,
     launch,
     leaderboard,
+    limit_order,
     my_launches,
     onboarding,
     onramp,
@@ -81,6 +82,7 @@ def register_all(ctx) -> None:
     copy.register(ctx)
     agent_plan.register(ctx)
     alerts.register(ctx)
+    limit_order.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel

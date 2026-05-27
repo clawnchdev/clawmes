@@ -77,6 +77,7 @@ FREE_TIER_CAPS = {
     "dca": 1,
     "copy": 1,
     "alerts": 3,
+    "limit_order": 1,
 }
 
 
