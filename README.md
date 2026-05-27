@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 86 commands. 25 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 87 commands. 27 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-86 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+87 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,7 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (10) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler |
+| **Trading & discovery** (11) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` `/alerts` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler, price + wallet activity alerts |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -327,6 +327,28 @@ State persists in `${HERMES_HOME}/clawmes/copy/follows.json`. The watcher seeds 
 `/agent` is a regex-based intent parser — not an LLM. Common trading phrasings ("DCA X of Y every Z", "buy X of Y", "follow N at M eth", "claim my fees", "burn N CLAWNCH", "top tokens", "show my launches", "balance") compile into a sequence of clawmes slash commands. Nothing materializes until you say `/agent confirm` — the draft lives per-sender in memory.
 
 Multi-step prompts join with `then` (bare commas would split numbers like `1,000,000`). Each step routes through the matching `handle_*` function, so the underlying command's safeguards (`/dca` v2 caps, `/buy` quote-then-confirm, etc.) still apply at execution time.
+
+### Alerts + token gating (v0.9.0)
+
+```
+/alerts add price CLAWNCH above 0.00002     # fire when price crosses
+/alerts add wallet 0xWhale…                 # fire on any new ERC-20 receipt
+/alerts list                                # all your alerts + last fire
+/alerts edit alert_abc threshold_usd 0.0001 # change a price threshold
+/alerts pause alert_abc                     # suspend
+/alerts history alert_abc                   # past fires
+/alerts status                              # global summary + service health
+```
+
+`/alerts` is notification-only — no transactions submitted, no wallet required. Price alerts auto-deactivate after firing (so a crossing doesn't repeatedly notify on every subsequent tick). Wallet alerts stay active and re-fire on each new tx because `last_seen_block` advances past the seen receipt. `AlertsSchedulerService` polls on the registry cadence (~60s).
+
+**Token gating.** Power features in `/dca`, `/copy`, `/agent`, and `/alerts` unlock at the `HOLDER` tier — any wallet holding 10,000+ $CLAWNCH (~$0.10). Free tier still gets each feature with these caps:
+- 1 active `/dca` schedule (HOLDER: unlimited + safeguard flags)
+- 1 active `/copy` follow (HOLDER: unlimited)
+- 3 active `/alerts` (HOLDER: unlimited)
+- `/agent` single-step prompts (HOLDER: multi-step with `then` chains)
+
+The gate reads your active wallet's $CLAWNCH balance via `eth_call`, caches the result for 60s, and never crashes a command on RPC error (transient failures fall back to free tier). Implementation in `clawmes/services/token_gate.py`.
 
 ## Base ecosystem integration
 

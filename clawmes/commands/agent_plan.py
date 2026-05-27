@@ -324,6 +324,15 @@ def _cmd_parse(sender_id: str, prompt: str) -> str:
             + "\n\nTry /agent examples for supported phrasings."
         )
 
+    # Multi-step prompts (2+ parsed steps) require HOLDER tier. Single-
+    # step prompts stay free so the regex compiler is approachable.
+    if len(plan) > 1:
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        gate_err = check_tier_or_error(Tier.HOLDER, feature="/agent multi-step prompts")
+        if gate_err:
+            return gate_err
+
     _DRAFTS[sender_id] = plan
     lines = [f"Plan parsed ({len(plan)} step(s)):", ""]
     for i, step in enumerate(plan, start=1):

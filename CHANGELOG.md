@@ -6,6 +6,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.9.0 — 2026-05-27
+
+### Added — token-gated power features + `/alerts`
+
+Two new surfaces that together push more $CLAWNCH demand to clawmes
+power users while expanding what the agent can react to.
+
+- **Token gating** (`clawmes/services/token_gate.py`) — power features
+  unlock based on $CLAWNCH balance. Two tiers:
+  - `FREE` (no balance required) — `/buy`, `/trending`, `/balance`,
+    `/leaderboard`, `/claim`, `/onramp`, `/launch`, `/burn`,
+    `/agent` single-step. Capped versions of recurring features: 1
+    active `/dca`, 1 active `/copy`, 3 active `/alerts`, no
+    safeguard flags on `/dca`.
+  - `HOLDER` — any wallet holding **10,000+ $CLAWNCH** (~$0.10).
+    Unlocks unlimited `/dca` schedules + safeguard flags,
+    unlimited `/copy` follows, `/agent` multi-step prompts,
+    unlimited `/alerts`.
+  - Implementation: lazy balance read via `eth_call`, 60-second
+    cache to avoid hammering RPC. Gate helpers
+    (`check_tier_or_error`, `check_cap_or_error`) return a
+    human-readable error string when blocked, with the exact
+    balance shortfall + how-to-buy hints. No wallet connected →
+    treated as free tier; the gate never crashes a command.
+
+- **`/alerts`** — price + wallet-activity alerts. Notification-only;
+  no transactions submitted.
+  - `/alerts add price <token> <above|below> <usd>` — fire when token
+    price crosses the threshold. Polls `defi_price` on the registry
+    tick. Auto-deactivates after firing so we don't re-notify.
+  - `/alerts add wallet <address>` — fire on any new ERC-20 receipt
+    to the watched wallet. Same Basescan poller as `/copy`. Stays
+    active so each new tx fires.
+  - `/alerts list` / `pause` / `resume` / `cancel` / `edit` /
+    `tick` / `status` / `history` — same mutation surface as `/dca`.
+  - `AlertsSchedulerService` (id `clawmes.alerts_scheduler`) ticks
+    on the registry cadence (~60s). Per-alert errors caught
+    internally so one bad alert can't crash the loop.
+
+### Internal
+
+- `clawmes/services/token_gate.py` (+ `tests/services/test_token_gate.py`).
+- `clawmes/commands/alerts.py` (+ `tests/commands/test_alerts.py`).
+- `clawmes/services/alerts_scheduler.py` (+
+  `tests/services/test_alerts_scheduler.py`).
+- Gate calls added to `/dca add`, `/copy add`, `/agent` multi-step
+  parse. Free tier behaviour is the default; HOLDER tier removes the
+  cap.
+- `tests/conftest.py` autouse fixture patches the gate helpers to
+  always-pass for the existing test suite — new tests in
+  `tests/commands/test_token_gating.py` and the corresponding new-
+  command test files specifically exercise the rejection branches.
+- 3660 tests pass at 100% coverage (was 3513). README counts: 86 →
+  87 commands, 25 → 27 services.
+
 ## 0.8.0 — 2026-05-27
 
 ### Added — `/agent` natural-language plan compiler
