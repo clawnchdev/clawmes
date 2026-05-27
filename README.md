@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 75 commands. 22 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 84 commands. 23 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-81 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+84 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,7 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (5) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link |
+| **Trading & discovery** (8) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -250,6 +250,32 @@ After launching (or any time): three commands cover the basic loop of finding to
 ```
 
 `/buy` uses the existing `defi_swap` tool under the hood — 0x aggregator with Permit2 (single signature, no separate `approve` tx). The quote step always renders the resolved address before signing, so you can verify you're buying the right token. `--all` resolution returns the highest-volume Base pair for the symbol; `--clawnch` additionally verifies the address against the Clawnch launches table.
+
+### Leaderboards, fee claiming, dollar-cost averaging (v0.6.0)
+
+```
+/leaderboard                       # top 10 Clawnch tokens by 24h volume
+/leaderboard launchers             # top 10 agents by recent launch count
+/leaderboard burners               # top $CLAWNCH burners (stub — points at on-chain data)
+/leaderboard launchers 25          # bump the limit (capped at 25)
+
+/claim                             # preview your launches + claimable hint
+/claim MNEME                       # collect LP fees for one token via Clanker locker
+/claim 0x3FcD…7b07                 # full address also works
+/claim all                         # sweep every launch you own — one tx per token
+
+/dca add 0xa1F7…747be 0.001 1h     # buy 0.001 ETH of CLAWNCH every hour
+/dca list                          # show all your schedules + next run time
+/dca pause dca_abc123              # suspend without removing
+/dca resume dca_abc123             # re-arm
+/dca cancel dca_abc123             # delete
+/dca history dca_abc123            # past executions for a schedule
+/dca tick                          # run any due schedules (cron-callable, idempotent)
+```
+
+- `/leaderboard` hits `/api/tokens?sort=volume` + `/api/launches` and aggregates client-side. No new server-side endpoints required.
+- `/claim` calls Clanker v4's `collectRewards(address)` on the LP Locker Fee Conversion contract (`0x63D2DfEA…14d93496`). The locker pays out to every recipient slot per token in one shot — caller pays gas, the slot allocations get distributed to the rewardRecipients on that position. Each tx emits a `ClaimedRewards` event with per-recipient `(amount0, amount1)` arrays.
+- `/dca` schedules persist in `${HERMES_HOME}/clawmes/dca/schedules.json`. Interval grammar: `1m`, `30m`, `1h`, `4h`, `1d`, `1w` (1m floor, 1y ceiling). `/dca tick` is idempotent — only fires schedules whose `next_run_epoch` has passed, advances each schedule once per tick regardless of swap success/failure, so transient errors don't cascade into retry storms. Wire the tick into Hermes cron once you've set up schedules.
 
 ## Base ecosystem integration
 

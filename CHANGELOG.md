@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.6.0 — 2026-05-27
+
+### Added — leaderboards, fee claiming, dollar-cost averaging
+
+Three new commands that surface what's already on-chain and automate
+the parts of trading that benefit from a loop.
+
+- **`/leaderboard`** — three views in one command. `tokens` (default)
+  ranks Clawnch index tokens by 24h volume with live price, market
+  cap, and 24h change. `launchers` aggregates `/api/launches` client-
+  side by `agentName` × `source` to surface who's actually deploying.
+  `burners` is a stub today — points at the public burn address +
+  Basescan filter URL until the on-chain aggregator endpoint ships.
+  Read-only, no wallet needed.
+
+- **`/claim`** — sweep accumulated LP fees on tokens you launched.
+  Hits Clanker v4's `collectRewards(address)` on the LP Locker Fee
+  Conversion contract (`0x63D2DfEA64b3433F4071A98665bcD7Ca14d93496`).
+  Three modes: `/claim` (preview your launches), `/claim <address-or-
+  symbol>` (claim one), `/claim all` (sweep every launch, one tx per
+  token). The locker pays out to all reward recipients per token in
+  one shot — calling claim costs you gas but also pulls fees forward
+  for every co-recipient on the position. No view function exists for
+  pre-simulating amounts; verify on-chain via the `ClaimedRewards`
+  event on each receipt.
+
+- **`/dca`** — dollar-cost averaging on any Base token. Schedule
+  recurring ETH-funded buys at intervals from 1 minute to 1 year.
+  Subcommands: `add`, `list`, `pause`, `resume`, `cancel`, `tick`,
+  `history`. State persists in `${HERMES_HOME}/clawmes/dca/
+  schedules.json` so schedules survive restarts. `/dca tick` is cron-
+  safe and idempotent: only runs schedules whose `next_run_epoch` has
+  passed, advances each run regardless of outcome (transient failures
+  don't cascade), records the result on the schedule. Swap execution
+  reuses the `/buy` `defi_swap` pipeline.
+
+### Internal
+
+- 3231 tests pass at 100% coverage (was 3074).
+- `clawmes/lib/abi.py` already exposed every selector helper needed
+  by `/claim`; no encoder additions required. Selector for `collect
+  Rewards(address)` pinned as `0x5763dbd0` in `commands/claim.py`.
+- `_record` helper pattern (best-effort `command_history` write that
+  swallows exceptions) extracted consistently across all three new
+  commands so the recording layer can never break a user-visible
+  surface.
+
 ## 0.5.0 — 2026-05-26
 
 ### Added — deep Base ecosystem integration
