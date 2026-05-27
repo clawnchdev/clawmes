@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 85 commands. 25 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 86 commands. 25 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-85 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+86 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,7 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (9) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys |
+| **Trading & discovery** (10) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -310,6 +310,23 @@ After launching (or any time): three commands cover the basic loop of finding to
 The `CopyTraderService` polls Basescan's `account.tokentx` for every active follow on each registry tick (~60s). New ERC-20 transfers into the watched wallet trigger a copy buy via `defi_swap` at the configured fixed ETH amount. Same safeguard surface as `/dca` v2 (slippage / daily cap / total cap / max consecutive failures) plus a per-follow blocklist for known airdrop / spam contracts. Per-tick cap of 20 copies keeps a runaway airdrop streak from spawning hundreds of buys at once.
 
 State persists in `${HERMES_HOME}/clawmes/copy/follows.json`. The watcher seeds `last_seen_block` from the current chain head (minus a 10-block lookback for new follows) so the first tick doesn't replay 100 days of history.
+
+### Natural-language plan compiler (v0.8.0)
+
+```
+/agent DCA 0.001 ETH of CLAWNCH every 1h
+/agent buy 0.01 ETH of CLAWNCH then claim my fees
+/agent follow 0xWhale… at 0.001 eth
+/agent burn 1,000,000 CLAWNCH
+/agent show           # re-print the parsed plan
+/agent confirm        # materialize: runs each /command
+/agent cancel         # discard
+/agent examples       # full list of supported phrasings
+```
+
+`/agent` is a regex-based intent parser — not an LLM. Common trading phrasings ("DCA X of Y every Z", "buy X of Y", "follow N at M eth", "claim my fees", "burn N CLAWNCH", "top tokens", "show my launches", "balance") compile into a sequence of clawmes slash commands. Nothing materializes until you say `/agent confirm` — the draft lives per-sender in memory.
+
+Multi-step prompts join with `then` (bare commas would split numbers like `1,000,000`). Each step routes through the matching `handle_*` function, so the underlying command's safeguards (`/dca` v2 caps, `/buy` quote-then-confirm, etc.) still apply at execution time.
 
 ## Base ecosystem integration
 

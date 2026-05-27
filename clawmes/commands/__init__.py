@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from clawmes.commands import (
     agent,
+    agent_plan,
     allowlist,
     balance,
     burn,
@@ -77,6 +78,7 @@ def register_all(ctx) -> None:
     claim.register(ctx)
     dca.register(ctx)
     copy.register(ctx)
+    agent_plan.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel
