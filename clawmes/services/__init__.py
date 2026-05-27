@@ -38,6 +38,7 @@ def start_all() -> None:
     crashing.
     """
     from clawmes.plans.scheduler import get_scheduler
+    from clawmes.services.alerts_scheduler import get_alerts_scheduler_service
     from clawmes.services.bankr_service import get_bankr_service
     from clawmes.services.bv7x import get_bv7x_service
     from clawmes.services.clawnch import get_clawnch_service
@@ -58,6 +59,7 @@ def start_all() -> None:
     from clawmes.services.price import get_price_service
     from clawmes.services.rpc import get_rpc_service
     from clawmes.services.token_decimals import get_token_decimals_service
+    from clawmes.services.token_gate import get_token_gate_service
     from clawmes.services.wallet import get_wallet_service
     from clawmes.services.wc_notifications import get_wc_notification_consumer
     from clawmes.services.zerox import get_zerox_service
@@ -96,6 +98,10 @@ def start_all() -> None:
         get_rpc_service,
         # 4. Token decimals cache — depends on RPC.
         get_token_decimals_service,
+        # 4b. Token gate — depends on RPC. Resolves wallet → tier
+        #     based on $CLAWNCH balance. Gated features in /dca / /copy
+        #     / /agent / /alerts read from this on each gated call.
+        get_token_gate_service,
         # 4a. Block-explorer client — read-side, no dependencies; lives
         #     here so block_explorer tool dispatch is ready.
         get_explorer_service,
@@ -136,6 +142,11 @@ def start_all() -> None:
         #     followed wallets' new ERC-20 receipts and submits copy
         #     buys at the configured fixed ETH amount per copy.
         get_copy_trader_service,
+        # 7c. Alerts scheduler — ticking=True. Polls active alerts on
+        #     each tick (price quotes via defi_price, wallet receipts
+        #     via Basescan) and records fires. Notification delivery
+        #     is downstream via the channel layer.
+        get_alerts_scheduler_service,
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs
     ]
     for factory in factories:

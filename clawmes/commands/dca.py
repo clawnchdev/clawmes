@@ -267,6 +267,33 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
             "  [--max-total <eth>] [--max-failures <n>]\n"
             "Example: /dca add 0xa1F7…747be 0.001 1h --slippage 50 --daily-cap 0.05"
         )
+
+    # Free-tier cap: limit active schedules per sender. Holders bypass.
+    from clawmes.services.token_gate import Tier, check_cap_or_error, check_tier_or_error
+
+    state_check = _load_state()
+    active_mine = sum(
+        1
+        for s in state_check["schedules"]
+        if s.get("sender_id") == sender_id and s.get("status") == "active"
+    )
+    cap_err = check_cap_or_error("dca", active_count=active_mine, feature="DCA schedule")
+    if cap_err:
+        return cap_err
+
+    # Safeguard flags are a HOLDER-tier feature. The gate runs only when
+    # the user actually passed a safeguard flag — free-tier add without
+    # flags is fine.
+    safeguard_flags = {"slippage", "daily-cap", "max-total", "max-failures"}
+    used_safeguards = safeguard_flags & set(flags)
+    if used_safeguards:
+        tier_err = check_tier_or_error(
+            Tier.HOLDER,
+            feature=f"/dca safeguard flags ({', '.join(sorted(used_safeguards))})",
+        )
+        if tier_err:
+            return tier_err
+
     token, eth_amount_raw, interval_raw = pos[0], pos[1], pos[2]
 
     # Validate token: must be a 0x address. We don't resolve symbols here

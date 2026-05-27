@@ -214,6 +214,20 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
             "  [--max-total eth] [--max-failures n]\n"
             "  [--blocklist 0xa,0xb,…]"
         )
+
+    # Free-tier cap on active follows. Holders bypass.
+    from clawmes.services.token_gate import check_cap_or_error
+
+    state_check = _load_state()
+    active_mine = sum(
+        1
+        for f in state_check["follows"]
+        if f.get("sender_id") == sender_id and f.get("status") == "active"
+    )
+    cap_err = check_cap_or_error("copy", active_count=active_mine, feature="copy follow")
+    if cap_err:
+        return cap_err
+
     wallet, eth_raw = pos[0], pos[1]
     if not (wallet.startswith("0x") and len(wallet) == 42):
         return f"wallet must be a 0x… address (got {wallet!r})."

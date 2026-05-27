@@ -54,3 +54,21 @@ class FakePluginContext:
 @pytest.fixture
 def mock_ctx() -> FakePluginContext:
     return FakePluginContext()
+
+
+@pytest.fixture(autouse=True)
+def _default_holder_tier(monkeypatch):
+    """Default every test to HOLDER tier with no caps.
+
+    Token gating landed in v0.9.0 — most existing tests pre-date it and
+    don't care about the gate, so the autouse fixture short-circuits both
+    check helpers. Tests that specifically want to exercise the gate
+    re-patch these (or call ``token_gate._reset_for_tests()``) themselves.
+    """
+    try:
+        import clawmes.services.token_gate as tg
+
+        monkeypatch.setattr(tg, "check_tier_or_error", lambda *a, **k: None)
+        monkeypatch.setattr(tg, "check_cap_or_error", lambda *a, **k: None)
+    except ImportError:
+        pass
