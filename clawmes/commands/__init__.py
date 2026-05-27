@@ -19,12 +19,15 @@ from clawmes.commands import (
     balance,
     burn,
     buy,
+    claim,
+    dca,
     discovery,
     doctor,
     evolve,
     identity,
     info,
     launch,
+    leaderboard,
     my_launches,
     onboarding,
     onramp,
@@ -69,6 +72,9 @@ def register_all(ctx) -> None:
     my_launches.register(ctx)
     burn.register(ctx)
     onramp.register(ctx)
+    leaderboard.register(ctx)
+    claim.register(ctx)
+    dca.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel
