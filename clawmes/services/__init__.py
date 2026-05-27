@@ -52,6 +52,9 @@ def start_all() -> None:
     from clawmes.services.explorer import get_explorer_service
     from clawmes.services.identity import get_identity_service
     from clawmes.services.lifi import get_lifi_service
+    from clawmes.services.limit_order_scheduler import (
+        get_limit_order_scheduler_service,
+    )
     from clawmes.services.mode_service import get_mode_service
     from clawmes.services.onboarding_service import get_onboarding_service
     from clawmes.services.opengateway import get_opengateway_service
@@ -147,6 +150,10 @@ def start_all() -> None:
         #     via Basescan) and records fires. Notification delivery
         #     is downstream via the channel layer.
         get_alerts_scheduler_service,
+        # 7d. Limit-order scheduler — ticking=True. Evaluates active
+        #     orders against current USD prices and fires swaps via
+        #     defi_swap when thresholds are crossed.
+        get_limit_order_scheduler_service,
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs
     ]
     for factory in factories:

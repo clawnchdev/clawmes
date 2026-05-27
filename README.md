@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 87 commands. 27 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 88 commands. 28 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-87 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+88 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,7 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (11) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` `/alerts` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler, price + wallet activity alerts |
+| **Trading & discovery** (12) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` `/alerts` `/limit_order` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler, price + wallet activity alerts, limit buys + take-profit sells |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -349,6 +349,40 @@ Multi-step prompts join with `then` (bare commas would split numbers like `1,000
 - `/agent` single-step prompts (HOLDER: multi-step with `then` chains)
 
 The gate reads your active wallet's $CLAWNCH balance via `eth_call`, caches the result for 60s, and never crashes a command on RPC error (transient failures fall back to free tier). Implementation in `clawmes/services/token_gate.py`.
+
+### Trader power-pack (v0.10.0)
+
+```
+/portfolio                  # live balances (unchanged) + P&L hint
+/portfolio pnl              # overall realized + unrealized P&L
+/portfolio realized         # closed positions only
+/portfolio unrealized       # open positions at last price
+/portfolio export           # full lot-by-lot ledger
+
+/limit_order add buy CLAWNCH 0.01 below 0.00001
+                            # buy 0.01 ETH of CLAWNCH when price drops
+/limit_order add sell 0xToken… 1000000 above 0.00005
+                            # take-profit sell at the threshold
+/limit_order list           # all your orders + last attempt
+/limit_order pause lim_abc  # suspend
+/limit_order resume lim_abc # re-arm (paused orders only)
+/limit_order cancel lim_abc # remove
+/limit_order history lim_abc # past attempts (auto-fail after max-attempts)
+
+/wallet tag trading         # bookmark the active wallet under "trading"
+/wallet tags                # list all saved tags
+/wallet show trading        # print address/chain/mode for one tag
+/wallet untag trading       # remove
+
+/copy add 0xWhale… 0.001 --pct 50
+                            # copy each buy at 50% of target's outgoing ETH,
+                            # capped at 0.001 ETH (HOLDER tier)
+```
+
+- `/portfolio` P&L views route to the existing `cost_basis` tool — FIFO matching, USD-marked unrealized positions, exportable lot ledger.
+- `/limit_order` runs on the same scheduler pattern as `/dca` + `/copy`. State machine: `active → filled` on swap success, `active → failed` after `max_attempts` exhausted, `active → paused/cancelled` on manual mutation. Terminal states are sticky.
+- `/wallet` tags are metadata-only bookmarks at `${HERMES_HOME}/clawmes/wallet/tags.json`. They don't replace the active session — switching wallets still goes through the existing `/connect*` flow.
+- `/copy --pct N` reads the target tx's outgoing ETH via Basescan's `eth_getTransactionByHash`, scales to `N%`, caps at `eth_per_copy`. Falls back to fixed sizing when target tx had no ETH value (token-token swap) or when the lookup fails.
 
 ## Base ecosystem integration
 

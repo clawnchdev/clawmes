@@ -6,6 +6,74 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.10.0 — 2026-05-27
+
+### Added — trader power-pack: `/portfolio` v2 + `/limit_order` + multi-wallet + `/copy --pct`
+
+Four features expanding clawmes from a Base-launchpad agent into a
+generalist trader's home base.
+
+- **`/portfolio` v2** — new subcommands route to the existing
+  `cost_basis` tool for P&L views:
+  - `/portfolio` (default) — live balance summary via
+    `defi_balance` (unchanged behavior + a "P&L views" hint footer).
+  - `/portfolio pnl` — overall realized + unrealized summary.
+  - `/portfolio realized` — closed positions only.
+  - `/portfolio unrealized` — open positions marked at last price.
+  - `/portfolio export` — full lot-by-lot ledger.
+
+- **`/limit_order`** — DEX limit buys + take-profit sells.
+  - `/limit_order add buy <token> <eth_amount> below <usd>` — spend
+    ETH when price drops.
+  - `/limit_order add sell <token> <amount> above <usd>` — sell
+    held tokens when price rises.
+  - Full mutation surface: `list`, `pause`, `resume`, `cancel`,
+    `edit`, `tick`, `status`, `history`. Same vocabulary as `/dca`
+    and `/copy`.
+  - State machine: active → filled (swap succeeded) | failed
+    (max_attempts exhausted) | paused (manual) | cancelled (manual).
+    Terminal states are sticky; only paused orders can `resume`.
+  - `LimitOrderSchedulerService` (id `clawmes.limit_order_scheduler`)
+    ticks on the registry cadence. Polls prices via `defi_price` and
+    submits swaps via `defi_swap` when thresholds cross.
+  - Free tier cap: 1 active order. HOLDER tier: unlimited.
+
+- **Multi-wallet tag system** on `/wallet`:
+  - `/wallet tag <name>` — bookmark the active wallet under `<name>`
+    (records address + chain + mode).
+  - `/wallet tags` — list all saved tags.
+  - `/wallet untag <name>` — remove a tag.
+  - `/wallet show <name>` — print the address/chain/mode under one tag.
+  - Tags persist in `${HERMES_HOME}/clawmes/wallet/tags.json`.
+    They're metadata-only bookmarks; switching the active wallet
+    still goes through the existing `/connect*` flow.
+
+- **`/copy --pct N`** — percentage-based copy sizing.
+  - Scale each copy to `N%` of the target wallet's outgoing ETH on
+    the seen tx, capped at `eth_per_copy` (so a whale's huge buy
+    can't drain the follower's wallet).
+  - Falls back to fixed `eth_per_copy` when target tx had no ETH
+    value (token-token swap) or when the lookup fails.
+  - Reads parent-tx ETH value via Basescan's
+    `eth_getTransactionByHash` proxy endpoint — one RPC call per
+    detected copy, bounded by the existing per-tick cap of 20.
+  - HOLDER tier feature.
+
+### Internal
+
+- `clawmes/commands/limit_order.py` (+ tests).
+- `clawmes/services/limit_order_scheduler.py` (+ tests).
+- `clawmes/commands/copy.py` extended with `_compute_copy_amount`,
+  `_get_tx_eth_value`, and `--pct` flag handling.
+- `clawmes/commands/balance.py` extended with `_render_pnl` +
+  subcommand routing.
+- `clawmes/commands/wallet.py` extended with tag subcommands +
+  `_load_tags`/`_save_tags` JSON state.
+- `clawmes/services/token_gate.py` `FREE_TIER_CAPS` extended with
+  `limit_order: 1`.
+- 3831 tests pass at 100% coverage (was 3660). README counts: 87 →
+  88 commands, 27 → 28 services.
+
 ## 0.9.0 — 2026-05-27
 
 ### Added — token-gated power features + `/alerts`

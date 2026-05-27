@@ -70,7 +70,26 @@ async def handle_balance(raw_args: str) -> str:
     return f"Native balance for {short(state.address)} on {chain_label}: {pretty}"
 
 
-async def handle_portfolio(raw_args: str) -> str:
+async def handle_portfolio(raw_args: str, *, sender_id: str = "default") -> str:
+    """``/portfolio`` — native + ERC-20 balances by default; P&L on request.
+
+    Subcommands:
+      * (none)        live balance summary via ``defi_balance.summary``
+      * ``pnl``       overall P&L from the cost-basis ledger
+      * ``realized``  realized gains only (closed positions)
+      * ``unrealized`` unrealized gains (open positions, marked at last price)
+      * ``export``    full lot-by-lot ledger dump
+      * ``<chain>``   any non-subcommand token is treated as a chain hint
+    """
+    arg = (raw_args or "").strip()
+    sub = arg.split()[0].lower() if arg else ""
+    if sub in {"pnl", "realized", "unrealized", "export"}:
+        return _render_pnl(sub, sender_id)
+    return await _render_balance_summary(arg)
+
+
+async def _render_balance_summary(raw_args: str) -> str:
+    """The original /portfolio behavior — live balances via defi_balance."""
     state = get_wallet_state()
     if not state.connected or not state.address:
         return "No wallet connected. Run /connect or /connect_local first."
@@ -92,14 +111,44 @@ async def handle_portfolio(raw_args: str) -> str:
     if payload.get("isError"):
         return payload.get("content", [{}])[0].get("text", "portfolio query failed")
 
-    # The defi_balance summary already produces a chat-friendly multi-line
-    # rendering in payload["content"][0]["text"]. Use it directly.
+    content = payload.get("content") or []
+    if content and content[0].get("text"):
+        text = content[0]["text"]
+        return text + "\n\nP&L views: /portfolio pnl | realized | unrealized | export"
+    details = payload.get("details") or {}
+    return f"Portfolio for {short(state.address)} on {chain}: {details!r}"
+
+
+# Map user-facing subcommand → cost_basis action.
+_PNL_ACTION_MAP = {
+    "pnl": "summary",
+    "realized": "realized",
+    "unrealized": "unrealized",
+    "export": "export",
+}
+
+
+def _render_pnl(sub: str, sender_id: str) -> str:
+    """Delegate to the ``cost_basis`` tool for a P&L view.
+
+    The tool already renders chat-friendly text in ``content[0]["text"]``;
+    this command just routes the user choice through the mapping table
+    and unwraps the envelope.
+    """
+    from clawmes.tools.cost_basis import cost_basis
+
+    action = _PNL_ACTION_MAP[sub]  # safe — sub is validated by the caller
+    raw = cost_basis({"action": action, "user_id": sender_id})
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return f"P&L query returned bad response: {raw}"
+    if payload.get("isError"):
+        return payload.get("content", [{}])[0].get("text", "P&L query failed")
     content = payload.get("content") or []
     if content and content[0].get("text"):
         return content[0]["text"]
-    # Defensive fallback if the tool ever changes its envelope.
-    details = payload.get("details") or {}
-    return f"Portfolio for {short(state.address)} on {chain}: {details!r}"
+    return f"P&L ({sub}): empty result."
 
 
 def register(ctx) -> None:

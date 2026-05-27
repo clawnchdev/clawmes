@@ -1,19 +1,86 @@
-"""Wallet commands: ``/wallet``, ``/connect``, ``/disconnect``, ``/mode``, ``/chain``, ``/address``."""
+"""Wallet commands: ``/wallet``, ``/connect``, ``/disconnect``, ``/mode``, ``/chain``, ``/address``.
+
+v0.10.0 adds wallet tagging subcommands on top of ``/wallet``:
+
+  * ``/wallet tag <name>``       — bookmark the active wallet under ``<name>``
+  * ``/wallet tags``             — list saved tags
+  * ``/wallet untag <name>``     — remove a saved tag
+  * ``/wallet show <name>``      — print the address/chain/mode saved under ``<name>``
+
+Tags are pure metadata — they let users keep notes like
+``trading``, ``treasury``, ``onramp`` mapped to specific addresses so
+you can flip context without re-typing. Switching the active wallet
+still goes through the existing ``/connect*`` / ``/disconnect`` /
+``/mode`` flow; tags are bookmarks, not session swaps.
+
+Storage: ``${HERMES_HOME}/clawmes/wallet/tags.json``. Per-process —
+not synced across machines (intentional; tag namespace is small).
+"""
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 from clawmes.lib.addr import short
 from clawmes.services.wallet import get_wallet_state
 
 
+def _tags_path() -> Path:
+    from clawmes.lib.paths import wallet_dir
+
+    return wallet_dir() / "tags.json"
+
+
+def _load_tags() -> dict[str, dict[str, str]]:
+    """Return ``{tag_name: {address, chain_id, chain_name, mode}}``."""
+    path = _tags_path()
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, dict)}
+
+
+def _save_tags(tags: dict[str, dict[str, str]]) -> None:
+    path = _tags_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(tags, f, indent=2, sort_keys=True)
+
+
 async def handle_wallet(raw_args: str) -> str:
+    arg = (raw_args or "").strip()
+    if arg:
+        parts = arg.split()
+        sub = parts[0].lower()
+        rest = parts[1:]
+        if sub == "tag":
+            return _cmd_tag(rest)
+        if sub in ("tags", "list_tags"):
+            return _cmd_tags()
+        if sub == "untag":
+            return _cmd_untag(rest)
+        if sub == "show":
+            return _cmd_show(rest)
+        # Fall through: unknown subcommand → show wallet status with hint.
+
     state = get_wallet_state()
     if not state.connected:
         return (
             "No wallet connected.\n"
             "  /connect          — pair via WalletConnect (recommended)\n"
             "  /connect_local    — generate or import a local key\n"
-            "  /connect_bankr    — pair Bankr custodial wallet"
+            "  /connect_bankr    — pair Bankr custodial wallet\n"
+            "\n"
+            "Tag subcommands (work even without a connected wallet):\n"
+            "  /wallet tags                  — list saved tags\n"
+            "  /wallet show <name>           — show one tag's address"
         )
     return "\n".join(
         [
@@ -22,6 +89,83 @@ async def handle_wallet(raw_args: str) -> str:
             f"Mode:     {state.mode}",
             f"Balance:  {state.balance_summary()}",
             f"Policies: {state.policy_summary()}",
+            "",
+            "Tag this wallet: /wallet tag <name>     (saves address + mode for later)",
+            "Saved tags:      /wallet tags",
+        ]
+    )
+
+
+def _cmd_tag(parts: list[str]) -> str:
+    if not parts:
+        return "Usage: /wallet tag <name>"
+    name = parts[0]
+    state = get_wallet_state()
+    if not state.connected or not state.address:
+        return "No wallet connected. Connect one first, then tag it."
+    tags = _load_tags()
+    tags[name] = {
+        "address": state.address,
+        "chain_id": str(state.chain_id) if state.chain_id is not None else "",
+        "chain_name": state.chain_name or "",
+        "mode": state.mode or "",
+    }
+    _save_tags(tags)
+    return (
+        f"Tagged active wallet as '{name}':\n"
+        f"  Address: {state.address}\n"
+        f"  Chain:   {state.chain_name} (id {state.chain_id})\n"
+        f"  Mode:    {state.mode}\n"
+        "\n"
+        "Use /wallet show <name> to recall this later, or /wallet tags to list all."
+    )
+
+
+def _cmd_tags() -> str:
+    tags = _load_tags()
+    if not tags:
+        return "No wallet tags saved. Tag the active wallet with /wallet tag <name>."
+    lines = [f"Wallet tags ({len(tags)}):", ""]
+    for name in sorted(tags):
+        meta = tags[name]
+        lines.append(
+            f"  {name:<15s}"
+            f"  {short(meta.get('address', ''))}"
+            f"  on {meta.get('chain_name') or '?'}"
+            f"  ({meta.get('mode') or '?'})"
+        )
+    return "\n".join(lines)
+
+
+def _cmd_untag(parts: list[str]) -> str:
+    if not parts:
+        return "Usage: /wallet untag <name>"
+    name = parts[0]
+    tags = _load_tags()
+    if name not in tags:
+        return f"No tag named {name!r}."
+    del tags[name]
+    _save_tags(tags)
+    return f"Removed tag '{name}'."
+
+
+def _cmd_show(parts: list[str]) -> str:
+    if not parts:
+        return "Usage: /wallet show <name>"
+    name = parts[0]
+    tags = _load_tags()
+    meta = tags.get(name)
+    if meta is None:
+        return f"No tag named {name!r}. /wallet tags to list."
+    return "\n".join(
+        [
+            f"Tag '{name}':",
+            f"  Address: {meta.get('address', '?')}",
+            f"  Chain:   {meta.get('chain_name') or '?'} (id {meta.get('chain_id') or '?'})",
+            f"  Mode:    {meta.get('mode') or '?'}",
+            "",
+            f"Reconnect: /connect_{meta.get('mode') or '<mode>'}  "
+            "(use the matching connect command for the saved mode)",
         ]
     )
 
