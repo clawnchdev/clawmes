@@ -43,6 +43,7 @@ def start_all() -> None:
     from clawmes.services.clawnch import get_clawnch_service
     from clawmes.services.coingecko import get_coingecko_service
     from clawmes.services.command_history import get_command_history_service
+    from clawmes.services.copy_trader import get_copy_trader_service
     from clawmes.services.credential_redactor import get_credential_redactor
     from clawmes.services.dca_scheduler import get_dca_scheduler_service
     from clawmes.services.endpoint_allowlist import get_endpoint_allowlist_service
@@ -131,6 +132,10 @@ def start_all() -> None:
         #     the registry cadence (60s by default). Sync execution path;
         #     per-schedule errors caught + logged.
         get_dca_scheduler_service,
+        # 7b. Copy-trader watcher — ticking=True. Polls Basescan for
+        #     followed wallets' new ERC-20 receipts and submits copy
+        #     buys at the configured fixed ETH amount per copy.
+        get_copy_trader_service,
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs
     ]
     for factory in factories:
