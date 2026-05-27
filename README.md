@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 84 commands. 24 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 85 commands. 25 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-84 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+85 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,7 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (8) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging |
+| **Trading & discovery** (9) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -285,6 +285,31 @@ After launching (or any time): three commands cover the basic loop of finding to
 - `/leaderboard` hits `/api/tokens?sort=volume` + `/api/launches` and aggregates client-side. No new server-side endpoints required.
 - `/claim` calls Clanker v4's `collectRewards(address)` on the LP Locker Fee Conversion contract (`0x63D2DfEA…14d93496`). The locker pays out to every recipient slot per token in one shot — caller pays gas, the slot allocations get distributed to the rewardRecipients on that position. Each tx emits a `ClaimedRewards` event with per-recipient `(amount0, amount1)` arrays.
 - `/dca` schedules persist in `${HERMES_HOME}/clawmes/dca/schedules.json`. Interval grammar: `1m`, `30m`, `1h`, `4h`, `1d`, `1w` (1m floor, 1y ceiling). The `DcaSchedulerService` ticks automatically on the registry cadence — no manual cron wiring needed. Safeguards (slippage, daily-cap, max-total, max-failures) attach per-schedule; the `max-failures` counter auto-pauses runaway schedules so a broken swap path can't burn gas in a loop. `/dca tick` is preserved as a synchronous testing entrypoint.
+
+### Copy-trading (v0.7.0)
+
+```
+/copy add 0xWhale… 0.001            # follow the whale's buys, copy at 0.001 ETH
+/copy add 0x… 0.005 --slippage 200 --daily-cap 0.05 --max-total 1
+                                    # full safeguard set on one follow
+/copy add 0x… 0.001 --blocklist 0xspam,0xspam2
+                                    # ignore known airdrop contracts
+/copy list                          # show your follows
+/copy edit copy_abc eth_per_copy 0.002
+                                    # change one field (eth_per_copy, slippage_bps,
+                                    # daily_cap_eth, max_eth_total, max_consecutive_failures,
+                                    # blocklist)
+/copy pause copy_abc                # stop watching without losing state
+/copy resume copy_abc               # re-arm
+/copy cancel copy_abc               # remove
+/copy status                        # global summary + service health
+/copy history copy_abc              # last 25 copies for one follow
+/copy tick                          # manual poll (testing)
+```
+
+The `CopyTraderService` polls Basescan's `account.tokentx` for every active follow on each registry tick (~60s). New ERC-20 transfers into the watched wallet trigger a copy buy via `defi_swap` at the configured fixed ETH amount. Same safeguard surface as `/dca` v2 (slippage / daily cap / total cap / max consecutive failures) plus a per-follow blocklist for known airdrop / spam contracts. Per-tick cap of 20 copies keeps a runaway airdrop streak from spawning hundreds of buys at once.
+
+State persists in `${HERMES_HOME}/clawmes/copy/follows.json`. The watcher seeds `last_seen_block` from the current chain head (minus a 10-block lookback for new follows) so the first tick doesn't replay 100 days of history.
 
 ## Base ecosystem integration
 

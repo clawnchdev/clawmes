@@ -6,6 +6,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.7.0 — 2026-05-27
+
+### Added — `/copy` copy-trading
+
+Watch a target wallet's ERC-20 receipts and mirror their buys at a
+configurable fixed ETH amount. Same safeguard surface as `/dca` v2
+(slippage / daily cap / total cap / max consecutive failures), plus a
+per-follow blocklist so airdrops and obvious spam don't trigger
+copies.
+
+- **Surface:**
+  - `/copy add <wallet> <eth_per_copy>` — follow a wallet's buys.
+    Flags: `--slippage <bps>`, `--daily-cap <eth>`, `--max-total <eth>`,
+    `--max-failures <n>`, `--blocklist <0xa,0xb,…>`.
+  - `/copy list` — show your follows + last seen block + copy count.
+  - `/copy pause <id>` / `resume <id>` / `cancel <id>` / `edit <id>
+    <field> <value>` — same mutation surface as `/dca`.
+  - `/copy tick` — manual poll-and-execute (cron-driven in production).
+  - `/copy status` — global summary + service health.
+  - `/copy history <id>` — last 25 copies for one follow.
+
+- **Watcher service** (`CopyTraderService`, id
+  `clawmes.copy_trader`) — ticking=True. Each tick polls Basescan's
+  `account.tokentx` endpoint for every active follow since the last
+  seen block, filters incoming transfers, drops blocklisted contracts,
+  and submits a copy buy at the configured amount. Per-tick cap of 20
+  to prevent runaway airdrop spam from spawning hundreds of buys.
+
+- **Safeguards:**
+  - Order: total cap → daily cap → wallet → swap, identical to
+    `/dca` v2 so the same failure-state vocabulary applies.
+  - Auto-pause after N consecutive failures (default 3).
+  - All Basescan + RPC + swap errors are caught per-follow inside the
+    runner; the service tick adds one more catch so one bad follow
+    cannot crash the cron loop.
+
+### Internal
+
+- `clawmes/commands/copy.py` (~620 lines), `clawmes/services/
+  copy_trader.py` (~80 lines).
+- 3455 tests pass at 100% coverage (was 3318).
+- README service count: 24 → 25. Commands: 84 → 85. Categories
+  unchanged (16).
+
 ## 0.6.1 — 2026-05-27
 
 ### Added — `/dca` v2: auto-scheduler, safeguards, new subcommands

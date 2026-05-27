@@ -1,0 +1,769 @@
+"""``/copy`` — copy-trade a wallet's buys with bounded execution.
+
+Watch another wallet's ERC-20 receipts. When the target receives a
+new token (i.e. they bought it on a DEX), submit our own buy of that
+token at a configurable fixed ETH amount. Safeguards mirror the ``/dca``
+v2 surface so the same auto-pause / cap discipline applies.
+
+Surface:
+
+  * ``/copy add <wallet> <eth_per_copy> [--slippage bps]
+    [--daily-cap eth] [--max-total eth] [--max-failures n]
+    [--blocklist 0x…,0x…]``
+                                              follow a wallet
+  * ``/copy list``                            show your follows
+  * ``/copy pause <id>``                      suspend without removing
+  * ``/copy resume <id>``                     re-arm
+  * ``/copy cancel <id>``                     remove entirely
+  * ``/copy edit <id> <field> <value>``       change one field
+  * ``/copy tick``                            manually poll + execute (testing)
+  * ``/copy status``                          global summary
+  * ``/copy history <id>``                    past copies
+
+Detection: each tick walks ``account.tokentx`` on Basescan for every
+followed wallet since the last seen block. Any incoming token transfer
+(``to == watched_wallet``) for a token NOT in the per-follow blocklist
+triggers a copy buy. We pay our own gas + slippage from the active
+wallet at tick time.
+
+False positives (airdrops, random sends) are minimized by:
+  * Per-follow blocklist (set via ``--blocklist`` or ``/copy edit``).
+  * Per-follow ETH cap (a runaway airdrop streak hits the daily cap
+    and the schedule pauses itself).
+  * Max-failures auto-pause when N consecutive copies fail.
+
+Storage: ``${HERMES_HOME}/clawmes/copy/follows.json``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import uuid
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from clawmes.lib.http import http_get
+
+_BASESCAN_BASE = "https://api.basescan.org/api"
+_DEFAULT_SLIPPAGE_BPS = 100
+_DEFAULT_MAX_FAILURES = 3
+_DEFAULT_LOOKBACK_BLOCKS = 10  # how far back to seed last_seen on first add
+_MAX_TX_PER_TICK = 20  # cap copies per tick to avoid runaway
+
+
+# ── helpers ─────────────────────────────────────────────────────────
+
+
+def _follows_path() -> Path:
+    from clawmes.lib.paths import state_dir
+
+    return state_dir("copy") / "follows.json"
+
+
+def _load_state() -> dict[str, Any]:
+    path = _follows_path()
+    if not path.exists():
+        return {"follows": []}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {"follows": []}
+    if not isinstance(data, dict) or not isinstance(data.get("follows"), list):
+        return {"follows": []}
+    return data
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    path = _follows_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _now_epoch() -> int:
+    return int(time.time())
+
+
+def _new_id() -> str:
+    return f"copy_{uuid.uuid4().hex[:10]}"
+
+
+def _short(value: str) -> str:
+    if not isinstance(value, str) or len(value) <= 12:
+        return str(value)
+    return f"{value[:6]}…{value[-4:]}"
+
+
+def _split_flags(parts: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Mirror of ``dca._split_flags`` — positional + ``--flag value`` pairs."""
+    positional: list[str] = []
+    flags: dict[str, str] = {}
+    i = 0
+    while i < len(parts):
+        tok = parts[i]
+        if tok.startswith("--"):
+            name = tok[2:]
+            value = parts[i + 1] if i + 1 < len(parts) else ""
+            flags[name] = value
+            i += 2
+        else:
+            positional.append(tok)
+            i += 1
+    return positional, flags
+
+
+def _parse_blocklist(raw: str) -> list[str]:
+    """Comma-separated token addresses → lowercased + validated list."""
+    if not raw:
+        return []
+    out = []
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if tok.startswith("0x") and len(tok) == 42:
+            out.append(tok.lower())
+    return out
+
+
+def _record(name: str, args: str, result: str) -> None:
+    try:
+        from clawmes.services.command_history import record_command_call
+
+        record_command_call(name, args, result)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ── command dispatch ───────────────────────────────────────────────
+
+
+async def handle_copy(raw_args: str, *, sender_id: str = "default", **_kwargs: Any) -> str:
+    raw = (raw_args or "").strip()
+    if not raw:
+        out = _render_usage()
+    else:
+        parts = raw.split()
+        sub = parts[0].lower()
+        rest = parts[1:]
+        if sub == "add":
+            out = _cmd_add(sender_id, rest)
+        elif sub in ("list", "ls"):
+            out = _cmd_list(sender_id)
+        elif sub == "pause":
+            out = _cmd_mutate(sender_id, rest, status="paused", verb="paused")
+        elif sub == "resume":
+            out = _cmd_mutate(sender_id, rest, status="active", verb="resumed")
+        elif sub in ("cancel", "rm", "remove"):
+            out = _cmd_cancel(sender_id, rest)
+        elif sub == "edit":
+            out = _cmd_edit(sender_id, rest)
+        elif sub == "tick":
+            out = await _cmd_tick()
+        elif sub == "status":
+            out = _cmd_status(sender_id)
+        elif sub == "history":
+            out = _cmd_history(sender_id, rest)
+        else:
+            out = f"Unknown subcommand: {sub!r}\n\n" + _render_usage()
+    _record("copy", raw_args, out)
+    return out
+
+
+def _render_usage() -> str:
+    return (
+        "Copy-trade — mirror a wallet's buys at a fixed ETH amount per copy.\n"
+        "\n"
+        "  /copy add <wallet> <eth_per_copy>\n"
+        "      [--slippage <bps>] [--daily-cap <eth>]\n"
+        "      [--max-total <eth>] [--max-failures <n>]\n"
+        "      [--blocklist <0xa,0xb,…>]\n"
+        "                          Follow a wallet's buys\n"
+        "  /copy list              Show your follows + last activity\n"
+        "  /copy pause <id>        Suspend without losing state\n"
+        "  /copy resume <id>       Re-arm a paused follow\n"
+        "  /copy cancel <id>       Remove a follow entirely\n"
+        "  /copy edit <id> <field> <value>\n"
+        "                          Change one field on a follow\n"
+        "  /copy tick              Manually poll + execute (testing)\n"
+        "  /copy status            Global summary + service health\n"
+        "  /copy history <id>      Past copies for a follow\n"
+        "\n"
+        "Example:\n"
+        "  /copy add 0xWhale… 0.001 --slippage 200 --daily-cap 0.05\n"
+        "    Watch the whale; copy each buy at 0.001 ETH with 2% slippage,\n"
+        "    cap 24h spend at 0.05 ETH. Service auto-pauses after 3 failures."
+    )
+
+
+# ── /copy add ───────────────────────────────────────────────────────
+
+
+def _cmd_add(sender_id: str, parts: list[str]) -> str:
+    pos, flags = _split_flags(parts)
+    if len(pos) < 2:
+        return (
+            "Usage: /copy add <wallet> <eth_per_copy>\n"
+            "  [--slippage bps] [--daily-cap eth]\n"
+            "  [--max-total eth] [--max-failures n]\n"
+            "  [--blocklist 0xa,0xb,…]"
+        )
+    wallet, eth_raw = pos[0], pos[1]
+    if not (wallet.startswith("0x") and len(wallet) == 42):
+        return f"wallet must be a 0x… address (got {wallet!r})."
+    try:
+        eth_per_copy = float(eth_raw)
+    except ValueError:
+        return f"eth_per_copy must be a number (got {eth_raw!r})."
+    if eth_per_copy <= 0:
+        return f"eth_per_copy must be positive (got {eth_per_copy})."
+
+    # Flag parsing — same shape as /dca add.
+    slippage_bps = _DEFAULT_SLIPPAGE_BPS
+    if "slippage" in flags:
+        try:
+            slippage_bps = int(flags["slippage"])
+        except ValueError:
+            return f"--slippage must be an integer bps value (got {flags['slippage']!r})."
+        if slippage_bps < 0 or slippage_bps > 10_000:
+            return f"--slippage must be 0–10000 bps (got {slippage_bps})."
+
+    daily_cap_eth: float | None = None
+    if "daily-cap" in flags:
+        try:
+            daily_cap_eth = float(flags["daily-cap"])
+        except ValueError:
+            return f"--daily-cap must be a number (got {flags['daily-cap']!r})."
+        if daily_cap_eth <= 0:
+            return f"--daily-cap must be positive (got {daily_cap_eth})."
+
+    max_eth_total: float | None = None
+    if "max-total" in flags:
+        try:
+            max_eth_total = float(flags["max-total"])
+        except ValueError:
+            return f"--max-total must be a number (got {flags['max-total']!r})."
+        if max_eth_total <= 0:
+            return f"--max-total must be positive (got {max_eth_total})."
+
+    max_failures = _DEFAULT_MAX_FAILURES
+    if "max-failures" in flags:
+        try:
+            max_failures = int(flags["max-failures"])
+        except ValueError:
+            return f"--max-failures must be an integer (got {flags['max-failures']!r})."
+        if max_failures < 1:
+            return f"--max-failures must be >= 1 (got {max_failures})."
+
+    blocklist = _parse_blocklist(flags.get("blocklist", ""))
+
+    # Seed last_seen_block from the current chain head. We default to a
+    # small lookback so the first tick doesn't replay 100 days of history
+    # but still catches anything from the last few blocks the user might
+    # have intended.
+    last_block = _current_block_height() - _DEFAULT_LOOKBACK_BLOCKS
+    if last_block < 0:
+        last_block = 0
+
+    state = _load_state()
+    follow_id = _new_id()
+    follow = {
+        "id": follow_id,
+        "sender_id": sender_id,
+        "wallet": wallet.lower(),
+        "eth_per_copy": eth_per_copy,
+        "slippage_bps": slippage_bps,
+        "daily_cap_eth": daily_cap_eth,
+        "max_eth_total": max_eth_total,
+        "max_consecutive_failures": max_failures,
+        "blocklist": blocklist,
+        "status": "active",
+        "created_at": _now_iso(),
+        "last_seen_block": last_block,
+        "total_eth_spent": 0.0,
+        "executions": [],
+    }
+    state["follows"].append(follow)
+    _save_state(state)
+
+    return (
+        f"Follow added: {follow_id}\n"
+        f"  Wallet:      {wallet}\n"
+        f"  Per copy:    {eth_per_copy} ETH\n"
+        f"  Slippage:    {slippage_bps} bps\n"
+        f"  Daily cap:   {daily_cap_eth if daily_cap_eth is not None else 'none'}\n"
+        f"  Total cap:   {max_eth_total if max_eth_total is not None else 'none'}\n"
+        f"  Max fails:   {max_failures}\n"
+        f"  Blocklist:   {len(blocklist)} token(s)\n"
+        f"  Last block:  {last_block}\n"
+        "\n"
+        "The copy-trader service polls Basescan every ~60s and submits a buy\n"
+        "whenever the followed wallet receives a non-blocklisted token. Use\n"
+        "/copy list to see all your follows."
+    )
+
+
+# ── /copy list / mutate / cancel ────────────────────────────────────
+
+
+def _cmd_list(sender_id: str) -> str:
+    state = _load_state()
+    mine = [f for f in state["follows"] if f.get("sender_id") == sender_id]
+    if not mine:
+        return "No /copy follows. Add one with /copy add <wallet> <eth_per_copy>."
+
+    lines = [f"Copy follows for {sender_id} ({len(mine)}):", ""]
+    for f in mine:
+        runs = len(f.get("executions", []))
+        lines.append(
+            f"  {f['id']}  {f.get('status'):<8s}"
+            f"  {f['eth_per_copy']} ETH/copy  → {_short(f['wallet'])}"
+            f"  ({runs} copies, last_block={f.get('last_seen_block')})"
+        )
+    return "\n".join(lines)
+
+
+def _cmd_mutate(sender_id: str, parts: list[str], *, status: str, verb: str) -> str:
+    if not parts:
+        return f"Usage: /copy {verb.removesuffix('d')} <id>"
+    fid = parts[0]
+    state = _load_state()
+    for f in state["follows"]:
+        if f.get("id") == fid and f.get("sender_id") == sender_id:
+            f["status"] = status
+            _save_state(state)
+            return f"Follow {fid} {verb}."
+    return f"No follow found with id {fid!r}."
+
+
+def _cmd_cancel(sender_id: str, parts: list[str]) -> str:
+    if not parts:
+        return "Usage: /copy cancel <id>"
+    fid = parts[0]
+    state = _load_state()
+    before = len(state["follows"])
+    state["follows"] = [
+        f for f in state["follows"] if not (f.get("id") == fid and f.get("sender_id") == sender_id)
+    ]
+    if len(state["follows"]) == before:
+        return f"No follow found with id {fid!r}."
+    _save_state(state)
+    return f"Cancelled follow {fid}."
+
+
+# ── /copy edit ──────────────────────────────────────────────────────
+
+
+_EDITABLE = {
+    "eth_per_copy",
+    "slippage_bps",
+    "daily_cap_eth",
+    "max_eth_total",
+    "max_consecutive_failures",
+    "blocklist",
+}
+
+
+def _cmd_edit(sender_id: str, parts: list[str]) -> str:
+    if len(parts) < 3:
+        return f"Usage: /copy edit <id> <field> <value>\nFields: {', '.join(sorted(_EDITABLE))}"
+    fid, field, value = parts[0], parts[1], parts[2]
+    if field not in _EDITABLE:
+        return f"Unknown field {field!r}. Editable: {', '.join(sorted(_EDITABLE))}"
+
+    state = _load_state()
+    follow = _find(state, fid, sender_id)
+    if follow is None:
+        return f"No follow found with id {fid!r}."
+
+    if field == "eth_per_copy":
+        try:
+            v = float(value)
+        except ValueError:
+            return f"eth_per_copy must be a number (got {value!r})."
+        if v <= 0:
+            return f"eth_per_copy must be positive (got {v})."
+        follow["eth_per_copy"] = v
+    elif field == "slippage_bps":
+        try:
+            v = int(value)
+        except ValueError:
+            return f"slippage_bps must be an integer (got {value!r})."
+        if v < 0 or v > 10_000:
+            return f"slippage_bps must be 0–10000 (got {v})."
+        follow["slippage_bps"] = v
+    elif field == "daily_cap_eth":
+        if value.lower() == "none":
+            follow["daily_cap_eth"] = None
+        else:
+            try:
+                v = float(value)
+            except ValueError:
+                return f"daily_cap_eth must be a number or 'none' (got {value!r})."
+            if v <= 0:
+                return f"daily_cap_eth must be positive (got {v})."
+            follow["daily_cap_eth"] = v
+    elif field == "max_eth_total":
+        if value.lower() == "none":
+            follow["max_eth_total"] = None
+        else:
+            try:
+                v = float(value)
+            except ValueError:
+                return f"max_eth_total must be a number or 'none' (got {value!r})."
+            if v <= 0:
+                return f"max_eth_total must be positive (got {v})."
+            follow["max_eth_total"] = v
+    elif field == "max_consecutive_failures":
+        try:
+            v = int(value)
+        except ValueError:
+            return f"max_consecutive_failures must be an integer (got {value!r})."
+        if v < 1:
+            return f"max_consecutive_failures must be >= 1 (got {v})."
+        follow["max_consecutive_failures"] = v
+    else:  # blocklist
+        follow["blocklist"] = _parse_blocklist(value)
+
+    _save_state(state)
+    return f"Follow {fid}: {field} = {value}."
+
+
+def _find(state: dict[str, Any], fid: str, sender_id: str) -> dict[str, Any] | None:
+    for f in state["follows"]:
+        if f.get("id") == fid and f.get("sender_id") == sender_id:
+            return f
+    return None
+
+
+# ── /copy tick — the actual watcher ─────────────────────────────────
+
+
+async def _cmd_tick() -> str:
+    """Manual ``/copy tick`` — delegates to the sync runner."""
+    n, lines = _run_due_with_lines()
+    if n == 0:
+        return "No copy follows had new activity."
+    return "\n".join([f"Processed {n} new tx(s)..."] + lines)
+
+
+def _run_due_sync() -> int:
+    """Service entrypoint — returns count of copies submitted across all follows."""
+    n, _ = _run_due_with_lines()
+    return n
+
+
+def _run_due_with_lines() -> tuple[int, list[str]]:
+    state = _load_state()
+    lines: list[str] = []
+    total = 0
+    for follow in state["follows"]:
+        if follow.get("status") != "active":
+            continue
+        try:
+            count = _process_follow(follow, lines)
+            total += count
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"  {follow['id']}  error fetching: {exc}")
+    if total > 0 or any(lines):
+        _save_state(state)
+    return total, lines
+
+
+def _process_follow(follow: dict[str, Any], lines: list[str]) -> int:
+    """Poll Basescan for new ERC-20 receipts on the followed wallet."""
+    txs = _basescan_token_receipts(
+        follow["wallet"], start_block=int(follow.get("last_seen_block", 0)) + 1
+    )
+    if not txs:
+        return 0
+
+    # Cap per-tick processing so a wallet that just received an airdrop
+    # to 500 tokens doesn't cause us to submit 500 buys.
+    txs = txs[:_MAX_TX_PER_TICK]
+    blocklist = set(follow.get("blocklist", []))
+    count = 0
+    max_block = int(follow.get("last_seen_block", 0))
+
+    for tx in txs:
+        token = (tx.get("contractAddress") or "").lower()
+        if not token or len(token) != 42:
+            continue
+        block_no = int(tx.get("blockNumber", 0))
+        if block_no > max_block:
+            max_block = block_no
+        if token in blocklist:
+            lines.append(f"  {follow['id']}  skipped {_short(token)} (blocklisted)")
+            follow["executions"].append(
+                {
+                    "at": _now_iso(),
+                    "tx_seen": tx.get("hash", ""),
+                    "token": token,
+                    "result": {"status": "blocklisted", "detail": "in follow blocklist"},
+                }
+            )
+            continue
+
+        result = _execute_copy(follow, token)
+        follow["executions"].append(
+            {
+                "at": _now_iso(),
+                "tx_seen": tx.get("hash", ""),
+                "token": token,
+                "result": result,
+            }
+        )
+        if result.get("status") == "ok":
+            follow["total_eth_spent"] = float(follow.get("total_eth_spent", 0.0)) + float(
+                follow["eth_per_copy"]
+            )
+            count += 1
+        lines.append(
+            f"  {follow['id']}  {result.get('status')}  {_short(token)}  {result.get('detail', '')}"
+        )
+
+    follow["last_seen_block"] = max_block
+    _maybe_auto_pause(follow)
+    return count
+
+
+def _maybe_auto_pause(follow: dict[str, Any]) -> None:
+    max_fails = int(follow.get("max_consecutive_failures") or _DEFAULT_MAX_FAILURES)
+    runs = follow.get("executions", [])
+    if len(runs) < max_fails:
+        return
+    tail = runs[-max_fails:]
+    fail_states = {"error", "no_wallet", "daily_capped", "total_capped"}
+    if all((r.get("result") or {}).get("status") in fail_states for r in tail):
+        follow["status"] = "paused"
+
+
+def _spend_in_last_24h(follow: dict[str, Any]) -> float:
+    runs = follow.get("executions", [])
+    cutoff = _now_epoch() - 86400
+    eth_per_copy = float(follow.get("eth_per_copy", 0.0))
+    total = 0.0
+    for run in runs:
+        if (run.get("result") or {}).get("status") != "ok":
+            continue
+        at = run.get("at", "")
+        try:
+            dt = datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+            ts = int(dt.timestamp())
+        except (ValueError, TypeError):
+            continue
+        if ts >= cutoff:
+            total += eth_per_copy
+    return total
+
+
+def _execute_copy(follow: dict[str, Any], token: str) -> dict[str, Any]:
+    """Submit one copy buy. Same safeguard order as /dca v2."""
+    eth_amount = float(follow.get("eth_per_copy", 0.0))
+
+    max_total = follow.get("max_eth_total")
+    if max_total is not None:
+        spent = float(follow.get("total_eth_spent", 0.0))
+        if spent + eth_amount > float(max_total):
+            return {
+                "status": "total_capped",
+                "detail": f"would exceed max-total {max_total} ETH (spent {spent})",
+                "tx_hash": "",
+            }
+
+    daily_cap = follow.get("daily_cap_eth")
+    if daily_cap is not None:
+        spent_24h = _spend_in_last_24h(follow)
+        if spent_24h + eth_amount > float(daily_cap):
+            return {
+                "status": "daily_capped",
+                "detail": f"would exceed daily-cap {daily_cap} ETH (spent {spent_24h:.6f} in 24h)",
+                "tx_hash": "",
+            }
+
+    from clawmes.services.wallet import get_wallet_state
+
+    wstate = get_wallet_state()
+    if not wstate.connected:
+        return {"status": "no_wallet", "detail": "no wallet connected", "tx_hash": ""}
+
+    try:
+        from clawmes.tools.defi_swap import defi_swap
+
+        raw = defi_swap(
+            {
+                "action": "swap",
+                "sell_token": "ETH",
+                "buy_token": token,
+                "sell_amount": str(eth_amount),
+                "slippage_bps": int(follow.get("slippage_bps") or _DEFAULT_SLIPPAGE_BPS),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "detail": str(exc), "tx_hash": ""}
+
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"status": "error", "detail": f"bad swap response: {raw}", "tx_hash": ""}
+    if payload.get("isError"):
+        msg = payload.get("content", [{}])[0].get("text", "swap failed")
+        return {"status": "error", "detail": msg, "tx_hash": ""}
+
+    details = payload.get("details") or {}
+    tx_hash = details.get("tx_hash") or details.get("txHash") or ""
+    return {"status": "ok", "detail": f"tx {tx_hash[:14]}…", "tx_hash": tx_hash}
+
+
+# ── Basescan polling ────────────────────────────────────────────────
+
+
+def _basescan_token_receipts(wallet: str, *, start_block: int) -> list[dict[str, Any]]:
+    """Return ERC-20 token transfers IN to ``wallet`` from ``start_block``+.
+
+    Uses Basescan's ``account.tokentx`` endpoint, filtered to incoming
+    transfers (``to == wallet``). Returns the raw entries; callers map
+    ``contractAddress`` → token to copy.
+    """
+    params = {
+        "module": "account",
+        "action": "tokentx",
+        "address": wallet,
+        "startblock": str(start_block),
+        "endblock": "99999999",
+        "sort": "asc",
+    }
+    api_key = os.environ.get("BASESCAN_API_KEY")
+    if api_key:
+        params["apikey"] = api_key
+
+    body = http_get(_BASESCAN_BASE, params=params, timeout=20.0)
+    if not isinstance(body, dict):
+        return []
+    if str(body.get("status")) != "1":
+        # status="0" usually means "No transactions found" — return [].
+        return []
+    result = body.get("result")
+    if not isinstance(result, list):
+        return []
+    # Keep only incoming transfers (``to`` matches the watched wallet).
+    incoming = [
+        x for x in result if isinstance(x, dict) and (x.get("to") or "").lower() == wallet.lower()
+    ]
+    return incoming
+
+
+def _current_block_height() -> int:
+    """Best-effort head-block fetch for seeding last_seen on new follows."""
+    params = {
+        "module": "proxy",
+        "action": "eth_blockNumber",
+    }
+    api_key = os.environ.get("BASESCAN_API_KEY")
+    if api_key:
+        params["apikey"] = api_key
+
+    try:
+        body = http_get(_BASESCAN_BASE, params=params, timeout=10.0)
+    except Exception:  # noqa: BLE001
+        return 0
+    if not isinstance(body, dict):
+        return 0
+    result = body.get("result")
+    if not isinstance(result, str) or not result.startswith("0x"):
+        return 0
+    try:
+        return int(result, 16)
+    except (ValueError, TypeError):
+        return 0
+
+
+# ── /copy status ────────────────────────────────────────────────────
+
+
+def _cmd_status(_sender_id: str) -> str:
+    state = _load_state()
+    follows = state.get("follows", [])
+    if not follows:
+        return "No /copy follows exist. The watcher service is idle."
+
+    by_status: dict[str, int] = {}
+    total_spent = 0.0
+    total_runs = 0
+    failures = 0
+    for f in follows:
+        s = f.get("status", "?")
+        by_status[s] = by_status.get(s, 0) + 1
+        total_spent += float(f.get("total_eth_spent", 0.0))
+        runs = f.get("executions", [])
+        total_runs += len(runs)
+        for r in runs:
+            status = (r.get("result") or {}).get("status", "")
+            if status in ("error", "no_wallet", "daily_capped", "total_capped"):
+                failures += 1
+
+    lines = [
+        f"/copy watcher status ({len(follows)} follow(s)):",
+        "",
+        f"  By status:    {', '.join(f'{k}={v}' for k, v in sorted(by_status.items()))}",
+        f"  Total copies: {total_runs}",
+        f"  Failures:     {failures}",
+        f"  ETH spent:    {total_spent:.6f}",
+    ]
+
+    try:
+        from clawmes.services.copy_trader import get_copy_trader_service
+
+        svc = get_copy_trader_service()
+        h = svc.health()
+        lines.append(
+            f"  Service:      {h.get('status')} "
+            f"(ticks={h.get('ticks')}, total_copies={h.get('total_runs')})"
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    return "\n".join(lines)
+
+
+# ── /copy history ───────────────────────────────────────────────────
+
+
+def _cmd_history(sender_id: str, parts: list[str]) -> str:
+    if not parts:
+        return "Usage: /copy history <id>"
+    fid = parts[0]
+    state = _load_state()
+    follow = _find(state, fid, sender_id)
+    if follow is None:
+        return f"No follow found with id {fid!r}."
+    runs = follow.get("executions", [])
+    if not runs:
+        return f"Follow {fid}: no copies yet. (Watcher will surface new buys on the next tick.)"
+    lines = [f"Copies for {fid} ({len(runs)}):", ""]
+    for run in runs[-25:]:  # most recent 25
+        result = run.get("result") or {}
+        status = result.get("status", "?")
+        token = run.get("token", "")
+        when = run.get("at", "")
+        tx_seen = run.get("tx_seen", "")
+        seen_str = f"  seen {_short(tx_seen)}" if tx_seen else ""
+        lines.append(f"  {when}  {status:<13s}  {_short(token)}{seen_str}")
+    # Quiet the timedelta import warning — it's used by tests.
+    _ = timedelta
+    return "\n".join(lines)
+
+
+def register(ctx) -> None:
+    ctx.register_command(
+        name="copy",
+        handler=handle_copy,
+        description="Copy-trade a wallet's buys at a fixed ETH amount",
+        args_hint="add <wallet> <eth> | list | pause | resume | cancel | edit | tick | status | history",
+    )
