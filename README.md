@@ -369,6 +369,31 @@ A third tier above HOLDER for the most aggressive features. Hold **100,000,000+ 
 - **`/sniper`** watches `/api/launches` on the registry tick and fires `defi_swap` buys for any newly-detected launch matching the configured filters. Filters compose: `--source` attribution, `--symbol-filter` regex, `--max-mcap` skip threshold, `--max-age` recency window (default 10min — older launches are presumed already sniped). Auto-exhausts after `--max-buys` (default 10) so a runaway launchpad can't drain your wallet. `SniperSchedulerService` drives the loop.
 - **`/agent --ai`** layers on top of the existing intent matcher. The regex parser runs first; the LLM only sees segments that didn't match. Rewrites are re-validated through the same `_parse_one` path so the LLM can't smuggle invented commands. Powered by OpenGateway; falls back gracefully when OpenGateway errors.
 
+### Paid-tier expansions (v0.12.0)
+
+Four feature additions across existing commands. Each lifts a specific paid-tier use case.
+
+```
+/copy add 0xWhale… 0.001 --invert            # HOLDER — also mirror sells
+/copy add 0xLead… 0.001 --multi 0xCo1,0xCo2  # UNLIMITED — follow multiple wallets
+/copy add 0xWhale… 0.001 --invert --multi 0xCo1,0xCo2
+                                              # both at once: track a cohort
+                                              # of whales, copy buys + sells
+
+/alerts add price CLAWNCH above 0.0001 --webhook https://hook.example.com/alert
+                                              # HOLDER — POST a JSON payload
+                                              # to your dashboard on fire
+
+/sniper add 0.005 --auto-sell 100:50         # UNLIMITED — take-profit at +100%,
+                                              # stop-loss at -50%, full lifecycle
+                                              # automation per snipe
+```
+
+- **`/copy --invert`** captures the "whale exiting" signal. When the watched wallet sends an ERC-20 OUT (to a DEX router), we check our balance and submit a corresponding sell. Combined with the default buy-on-receive behavior you get full mirror trading.
+- **`/copy --multi`** lets one follow record track multiple wallets. Polling iterates over every watched address each tick. Useful for cohort strategies: "watch these three whales; copy any buy from any of them."
+- **`/alerts --webhook <url>`** delivers a JSON payload on fire with `alert_id`, `sender_id`, `type`, `fired_at`, `detail`, and the full fire metadata. Failures never block the alert tick — they're recorded on the fire history.
+- **`/sniper --auto-sell <gain>:<loss>`** finishes the snipe lifecycle. After each successful snipe, the config anchors a watch to the buy-time USD price. Subsequent ticks compare current price against the gain/loss thresholds; when either fires, we sell our entire balance back to ETH. The watch transitions to `filled` on success or `close_failed` if the sell fails.
+
 ### Trader power-pack (v0.10.0)
 
 ```

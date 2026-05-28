@@ -116,6 +116,7 @@ def _record(name: str, args: str, result: str) -> None:
 
 
 def _split_flags(parts: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Positional + ``--flag value`` pairs. Bare ``--flag`` parses to empty string."""
     positional: list[str] = []
     flags: dict[str, str] = {}
     i = 0
@@ -123,9 +124,13 @@ def _split_flags(parts: list[str]) -> tuple[list[str], dict[str, str]]:
         tok = parts[i]
         if tok.startswith("--"):
             name = tok[2:]
-            value = parts[i + 1] if i + 1 < len(parts) else ""
-            flags[name] = value
-            i += 2
+            next_tok = parts[i + 1] if i + 1 < len(parts) else None
+            if next_tok is not None and not next_tok.startswith("--"):
+                flags[name] = next_tok
+                i += 2
+            else:
+                flags[name] = ""
+                i += 1
         else:
             positional.append(tok)
             i += 1
@@ -263,6 +268,27 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         except re.error as exc:
             return f"--symbol-filter is not a valid regex: {exc}"
 
+    # Auto-sell: "<gain_pct>:<loss_pct>" — take-profit and stop-loss
+    # thresholds for each sniped token. After a successful snipe, the
+    # token is added to the auto-sell watch list. On subsequent ticks
+    # the scheduler polls the price; when either threshold is crossed,
+    # we sell our balance. Still UNLIMITED-gated (covered by the
+    # outer /sniper gate).
+    auto_sell: dict[str, float] | None = None
+    if "auto-sell" in flags:
+        raw = flags["auto-sell"]
+        parts_as = raw.split(":")
+        if len(parts_as) != 2:
+            return f"--auto-sell must be '<gain_pct>:<loss_pct>' (got {raw!r})."
+        try:
+            gain_pct = float(parts_as[0])
+            loss_pct = float(parts_as[1])
+        except ValueError:
+            return f"--auto-sell values must be numbers (got {raw!r})."
+        if gain_pct <= 0 or loss_pct <= 0:
+            return f"--auto-sell values must be positive (got {raw!r})."
+        auto_sell = {"gain_pct": gain_pct, "loss_pct": loss_pct}
+
     state = _load_state()
     config_id = _new_id()
     config = {
@@ -276,6 +302,8 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         "symbol_filter": symbol_filter,
         "max_mcap_usd": max_mcap,
         "max_age_seconds": max_age,
+        "auto_sell": auto_sell,
+        "auto_sell_watches": [],
         "status": "active",
         "created_at": _now_iso(),
         "last_seen_epoch": _now_epoch(),
@@ -284,6 +312,11 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
     state["configs"].append(config)
     _save_state(state)
 
+    auto_sell_line = (
+        f"  Auto-sell:      +{auto_sell['gain_pct']}% / -{auto_sell['loss_pct']}%\n"
+        if auto_sell
+        else ""
+    )
     return (
         f"Sniper added: {config_id}\n"
         f"  Per snipe:      {eth_amount} ETH\n"
@@ -293,10 +326,11 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         f"  Symbol filter:  {symbol_filter or 'any'}\n"
         f"  Max mcap:       {f'${max_mcap}' if max_mcap is not None else 'any'}\n"
         f"  Max age:        {max_age}s (ignore launches older than this)\n"
-        "\n"
-        "The sniper service polls /api/launches on the registry tick (~60s)\n"
-        "and fires a buy on each newly-detected launch that matches the\n"
-        "filters. Auto-cancels after max-buys is reached."
+        + auto_sell_line
+        + "\n"
+        + "The sniper service polls /api/launches on the registry tick (~60s)\n"
+        + "and fires a buy on each newly-detected launch that matches the\n"
+        + "filters. Auto-cancels after max-buys is reached."
     )
 
 
@@ -500,6 +534,17 @@ def _run_due_with_lines() -> tuple[int, list[str]]:
         if config["buys_made"] >= int(config.get("max_buys") or _DEFAULT_MAX_BUYS):
             config["status"] = "exhausted"
 
+    # After all snipe processing, walk every config (including any that
+    # just transitioned to exhausted) and evaluate pending auto-sell
+    # watches. Auto-sell is decoupled from new-snipe filtering so a
+    # config can finish sniping but still close out its open positions.
+    for config in state["configs"]:
+        try:
+            sold = _evaluate_auto_sell_watches(config, lines)
+            total_fired += sold
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"  {config['id']}  auto-sell error: {exc}")
+
     if total_fired > 0 or any(lines):
         _save_state(state)
     return total_fired, lines
@@ -565,6 +610,21 @@ def _process_config(
         if result.get("status") == "ok":
             config["buys_made"] += 1
             count += 1
+            # On successful snipe, register an auto-sell watch if
+            # configured. The watch records the buy-time price as
+            # anchor so subsequent ticks can compare deltas.
+            if config.get("auto_sell"):
+                buy_price = _fetch_price(addr.lower())
+                if buy_price is not None and buy_price > 0:
+                    config.setdefault("auto_sell_watches", []).append(
+                        {
+                            "token": addr.lower(),
+                            "symbol": symbol,
+                            "buy_price_usd": buy_price,
+                            "created_at": _now_iso(),
+                            "status": "active",
+                        }
+                    )
         lines.append(
             f"  {config['id']}  {result.get('status')}  "
             f"{_short(addr)} ({symbol})  {result.get('detail', '')}"
@@ -590,6 +650,150 @@ def _parse_launch_epoch(launch: dict[str, Any]) -> int:
                 except ValueError:
                     continue
     return 0  # unparseable → treated as old; max-age filter will skip
+
+
+def _fetch_price(token: str) -> float | None:
+    """USD price of ``token`` via ``defi_price``. Returns ``None`` on error.
+
+    Used by the auto-sell engine to anchor buy prices and detect
+    threshold crossings. We never raise — a failed price read is
+    treated as "skip the watch for this tick."
+    """
+    try:
+        from clawmes.tools.defi_price import defi_price
+
+        raw = defi_price({"action": "quote", "symbol": token, "quote_currency": "USD"})
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if payload.get("isError"):
+        return None
+    details = payload.get("details") or {}
+    price = details.get("price_usd") or details.get("price")
+    try:
+        return float(price)
+    except (TypeError, ValueError):
+        return None
+
+
+def _evaluate_auto_sell_watches(config: dict[str, Any], lines: list[str]) -> int:
+    """Walk every active auto-sell watch on ``config`` and sell if triggered.
+
+    For each watch:
+
+      * Read current USD price via ``_fetch_price``.
+      * Compute pct change from buy-time anchor.
+      * If pct >= ``gain_pct`` (take-profit) or pct <= ``-loss_pct``
+        (stop-loss), sell our balance and mark the watch ``filled``.
+
+    Returns the count of sells executed.
+    """
+    watches = config.get("auto_sell_watches", [])
+    auto_sell = config.get("auto_sell")
+    if not watches or not auto_sell:
+        return 0
+    gain_pct = float(auto_sell.get("gain_pct", 0))
+    loss_pct = float(auto_sell.get("loss_pct", 0))
+    sold = 0
+    for watch in watches:
+        if watch.get("status") != "active":
+            continue
+        current = _fetch_price(watch["token"])
+        if current is None or current <= 0:
+            continue
+        buy_price = float(watch["buy_price_usd"])
+        delta_pct = (current - buy_price) / buy_price * 100.0
+        triggered = (
+            (delta_pct >= gain_pct and "take_profit")
+            or (delta_pct <= -loss_pct and "stop_loss")
+            or None
+        )
+        if not triggered:
+            continue
+        # Threshold crossed — sell our balance back to ETH.
+        result = _submit_token_sell(config, watch["token"])
+        watch["closed_at"] = _now_iso()
+        watch["closed_at_price_usd"] = current
+        watch["delta_pct"] = delta_pct
+        watch["close_reason"] = triggered
+        watch["close_result"] = result
+        if result.get("status") == "ok":
+            watch["status"] = "filled"
+            sold += 1
+        else:
+            watch["status"] = "close_failed"
+        lines.append(
+            f"  {config['id']}  auto-sell {result.get('status')} "
+            f"({triggered}, {delta_pct:+.1f}%)  "
+            f"{_short(watch['token'])} ({watch.get('symbol', '')})"
+        )
+    return sold
+
+
+def _submit_token_sell(config: dict[str, Any], token: str) -> dict[str, Any]:
+    """Sell our entire balance of ``token`` back to ETH."""
+    from clawmes.services.wallet import get_wallet_state
+
+    wstate = get_wallet_state()
+    if not wstate.connected:
+        return {"status": "no_wallet", "detail": "no wallet connected", "tx_hash": ""}
+
+    balance_wei = _read_our_token_balance(token, wstate.address)
+    if balance_wei <= 0:
+        return {
+            "status": "no_balance",
+            "detail": "no balance to sell",
+            "tx_hash": "",
+        }
+
+    try:
+        from clawmes.tools.defi_swap import defi_swap
+
+        raw = defi_swap(
+            {
+                "action": "swap",
+                "sell_token": token,
+                "buy_token": "ETH",
+                "sell_amount_wei": str(balance_wei),
+                "slippage_bps": int(config.get("slippage_bps") or _DEFAULT_SLIPPAGE_BPS),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "detail": str(exc), "tx_hash": ""}
+
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"status": "error", "detail": f"bad swap response: {raw}", "tx_hash": ""}
+    if payload.get("isError"):
+        msg = payload.get("content", [{}])[0].get("text", "swap failed")
+        return {"status": "error", "detail": msg, "tx_hash": ""}
+
+    details = payload.get("details") or {}
+    tx_hash = details.get("tx_hash") or details.get("txHash") or ""
+    return {"status": "ok", "detail": f"sold via tx {tx_hash[:14]}…", "tx_hash": tx_hash}
+
+
+def _read_our_token_balance(token: str, address: str | None) -> int:
+    """Read our balance of ``token`` via ``balanceOf`` eth_call."""
+    if not address:
+        return 0
+    try:
+        from clawmes.lib.abi import decode_uint, encode_balance_of
+        from clawmes.services.rpc import get_rpc_service
+
+        rpc = get_rpc_service()
+        raw = rpc.eth_call(
+            to=token,
+            data=encode_balance_of(address),
+            chain_id=8453,
+        )
+        return decode_uint(raw)
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _submit_snipe(config: dict[str, Any], token: str) -> dict[str, Any]:

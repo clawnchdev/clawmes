@@ -7,4 +7,4 @@ Read by:
   * Tooling that does not want to incur a full package import
 """
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
