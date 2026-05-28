@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 89 commands. 29 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 90 commands. 29 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-89 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+90 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,7 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (13) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` `/alerts` `/limit_order` `/sniper` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler, price + wallet activity alerts, limit buys + take-profit sells, auto-buy newly-launched tokens (Clawmes Unlimited) |
+| **Trading & discovery** (14) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` `/alerts` `/limit_order` `/sniper` `/strategy` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler, price + wallet activity alerts, limit buys + take-profit sells, auto-buy newly-launched tokens (Clawmes Unlimited), preset strategy templates (Clawmes Unlimited) |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |

@@ -354,6 +354,20 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         if max_failures < 1:
             return f"--max-failures must be >= 1 (got {max_failures})."
 
+    # Conditional execution: only fire if ``conditional`` evaluates to True.
+    # UNLIMITED-tier feature. Grammar in :func:`_parse_conditional`.
+    conditional: dict[str, Any] | None = None
+    if "conditional" in flags:
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        gate_err = check_tier_or_error(Tier.UNLIMITED, feature="/dca --conditional gates")
+        if gate_err:
+            return gate_err
+        parsed, err = _parse_conditional(flags["conditional"])
+        if err:
+            return f"--conditional parse error: {err}"
+        conditional = parsed
+
     state = _load_state()
     sched_id = _new_id()
     now = _now_epoch()
@@ -374,10 +388,14 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         "max_eth_total": max_eth_total,
         "max_consecutive_failures": max_failures,
         "total_eth_spent": 0.0,
+        "conditional": conditional,
     }
     state["schedules"].append(schedule)
     _save_state(state)
 
+    conditional_line = (
+        f"  Conditional: {_describe_conditional(conditional)}\n" if conditional else ""
+    )
     return (
         f"Schedule added: {sched_id}\n"
         f"  Token:       {token}\n"
@@ -387,12 +405,75 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         f"  Daily cap:   {daily_cap_eth if daily_cap_eth is not None else 'none'}\n"
         f"  Total cap:   {max_eth_total if max_eth_total is not None else 'none'}\n"
         f"  Max fails:   {max_failures}\n"
-        f"  Next run:    ~{_format_interval(seconds)} from now\n"
+        + conditional_line
+        + f"  Next run:    ~{_format_interval(seconds)} from now\n"
         "\n"
         "The DCA scheduler service ticks automatically (every ~60s).\n"
         "Use /dca list to see all schedules, or /dca dry-run <id> to\n"
         "preview the swap without submitting."
     )
+
+
+def _parse_conditional(raw: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse a conditional expression. Returns ``(parsed, error_msg)``.
+
+    Grammar:
+
+      ``price_above:<token>:<usd>``  — fire only when ``price(<token>) > <usd>``
+      ``price_below:<token>:<usd>``  — fire only when ``price(<token>) < <usd>``
+
+    Future grammar (deferred): time windows, AND/OR composition,
+    on-chain conditions (wallet balance thresholds, block height, etc).
+    """
+    parts = raw.split(":")
+    if len(parts) != 3:
+        return None, (
+            f"expected 'price_above:<token>:<usd>' or 'price_below:<token>:<usd>' (got {raw!r})"
+        )
+    op, token, usd_raw = parts[0], parts[1], parts[2]
+    if op not in ("price_above", "price_below"):
+        return None, f"unknown operator {op!r} (use price_above or price_below)"
+    try:
+        threshold_usd = float(usd_raw)
+    except ValueError:
+        return None, f"usd threshold must be a number (got {usd_raw!r})"
+    if threshold_usd <= 0:
+        return None, f"usd threshold must be positive (got {threshold_usd})"
+    return {"op": op, "token": token, "threshold_usd": threshold_usd}, None
+
+
+def _describe_conditional(cond: dict[str, Any]) -> str:
+    op = cond.get("op", "")
+    symbol = "above" if op == "price_above" else "below"
+    return f"price({cond.get('token', '?')}) {symbol} ${cond.get('threshold_usd', '?')}"
+
+
+def _conditional_satisfied(cond: dict[str, Any]) -> bool:
+    """Evaluate a conditional. Returns ``False`` if the price read fails."""
+    from clawmes.tools.defi_price import defi_price
+
+    try:
+        raw = defi_price({"action": "quote", "symbol": cond["token"], "quote_currency": "USD"})
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return False
+    if payload.get("isError"):
+        return False
+    details = payload.get("details") or {}
+    price = details.get("price_usd") or details.get("price")
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return False
+    threshold = float(cond["threshold_usd"])
+    if cond["op"] == "price_above":
+        return price > threshold
+    if cond["op"] == "price_below":
+        return price < threshold
+    return False
 
 
 # ── /dca list ───────────────────────────────────────────────────────
@@ -707,6 +788,28 @@ def _run_due_with_lines() -> tuple[int, list[str]]:
 
     lines: list[str] = []
     for sched in due:
+        # If the schedule has a conditional, evaluate it FIRST. A
+        # blocking conditional advances next_run_epoch but skips
+        # execution (the schedule keeps its cadence so the next
+        # interval re-checks).
+        conditional = sched.get("conditional")
+        if conditional and not _conditional_satisfied(conditional):
+            sched["executions"].append(
+                {
+                    "at": _now_iso(),
+                    "result": {
+                        "status": "conditional_blocked",
+                        "detail": _describe_conditional(conditional),
+                    },
+                    "tx_hash": "",
+                }
+            )
+            sched["next_run_epoch"] = now + sched["interval_seconds"]
+            lines.append(
+                f"  {sched['id']}  conditional_blocked  {_describe_conditional(conditional)}"
+            )
+            continue
+
         result = _execute_sync(sched)
         sched["executions"].append(
             {"at": _now_iso(), "result": result, "tx_hash": result.get("tx_hash", "")}

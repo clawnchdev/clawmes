@@ -6,6 +6,68 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.13.0 — 2026-05-28
+
+### Added — more UNLIMITED features
+
+Three additions deepening the autopilot tier.
+
+- **`/sniper --auto-trail <pct>`** (UNLIMITED) — trailing stop-loss on
+  snipes. As price rises, the stop anchor moves up to track the
+  running high-water mark. When price drops `pct%` below the high-
+  water mark, we sell our balance back to ETH. Pairs naturally with
+  `--auto-sell`: take-profit triggers a full exit immediately, while
+  trailing-stop lets winners run.
+
+  Trigger priority when both are configured: `take_profit` →
+  `trailing_stop` → `stop_loss`. Whichever fires first wins.
+
+- **`/dca --conditional <expr>`** (UNLIMITED) — only fire if the
+  conditional evaluates to True at tick time. Grammar:
+
+    `price_above:<token>:<usd>`  — fire only when price(token) > USD
+    `price_below:<token>:<usd>`  — fire only when price(token) < USD
+
+  Blocked runs are recorded with `status: conditional_blocked` and
+  the schedule's `next_run_epoch` still advances so the cadence stays
+  intact. Use case: "buy CLAWNCH every hour BUT only when BTC > $100k"
+  or "DCA into ETH BUT only when ETH < $3000" (buy-the-dip).
+
+- **`/strategy`** (UNLIMITED) — preset templates that compose multiple
+  commands. UNLIMITED-gated. Three presets to start:
+
+  * `whale-shadow <wallet> <eth_per_copy>` → `/copy add --invert` +
+    `/alerts add wallet` — copy a whale's buys + sells, get notified
+    on any new ERC-20 receipt.
+  * `dca-and-snipe <token> <dca_eth> <interval> <snipe_eth>` →
+    `/dca add` + `/sniper add` — DCA into a token on a cadence,
+    also snipe any newly-launched tokens.
+  * `laddered-tp <eth_per_copy> <wallet> <tp1>:<tp2>:<tp3>` →
+    `/copy add` + `/sniper add --auto-sell` — copy a wallet's buys
+    with a take-profit ladder attached.
+
+  `/strategy list` shows available presets. `/strategy preview` shows
+  what would be created without actually creating it. `/strategy
+  apply` materializes the steps. `/strategy history` shows past
+  applications.
+
+### Internal
+
+- `clawmes/commands/sniper.py`: `auto_trail_pct` field added to
+  config + watch. `_evaluate_auto_sell_watches` extended with
+  `high_water_price_usd` tracking and trailing-stop math. Watch
+  schema includes `high_water_price_usd` and `trail_drawdown_pct`
+  on close. Backward-compat: watches without `high_water_price_usd`
+  seed from `buy_price_usd` on first tick.
+- `clawmes/commands/dca.py`: `_parse_conditional`,
+  `_describe_conditional`, `_conditional_satisfied` helpers added.
+  `_run_due_with_lines` checks conditional first; blocked runs
+  advance `next_run_epoch` without executing.
+- `clawmes/commands/strategy.py` (new). `_PRESETS` registry +
+  `_dispatch_step` lazy command imports.
+- 4143 tests pass at 100% coverage (was 4068). README: +1 command
+  (89 → 90).
+
 ## 0.12.0 — 2026-05-28
 
 ### Added — paid-tier expansions
