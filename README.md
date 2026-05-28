@@ -12,7 +12,7 @@
 
 Clawmes is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin. Wallets, DEX trading, lending and staking, governance, on-chain automation. Python rewrite of [`@clawnch/openclaw-crypto`](https://github.com/clawnchdev/openclawnch) targeting Hermes.
 
-52 tools. 88 commands. 28 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
+52 tools. 89 commands. 29 services. 11 hooks. Runs on Telegram, Discord, Slack, Signal, WhatsApp, iMessage, and LINE.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-88 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+89 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
@@ -79,7 +79,7 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
 | **Balance & portfolio** (2) | `/balance` `/portfolio` |
-| **Trading & discovery** (12) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` `/alerts` `/limit_order` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler, price + wallet activity alerts, limit buys + take-profit sells |
+| **Trading & discovery** (13) | `/buy` `/trending` `/my_launches` `/burn` `/onramp` `/leaderboard` `/claim` `/dca` `/copy` `/agent` `/alerts` `/limit_order` `/sniper` — quote-then-confirm swaps via 0x, hot tokens on Base, list your launches, burn $CLAWNCH for Clanker vault %, Coinbase Onramp deep link, top tokens/launchers/burners, sweep accumulated LP fees, dollar-cost averaging, copy-trade a wallet's buys, NL plan compiler, price + wallet activity alerts, limit buys + take-profit sells, auto-buy newly-launched tokens (Clawmes Unlimited) |
 | **Self-evolution** (3) | `/evolve` `/stable` `/evolution` — gates `agent_memory` and `skill_evolve` write actions; OFF by default |
 | **Endpoint allowlist** (3) | `/allowlist` `/allow` `/disallow` — session-scoped host allowlist + 100-entry block audit ring |
 | **Discoverability** (5) | `/skills` `/persona` `/chains` `/tools_list` `/safety_status` |
@@ -349,6 +349,25 @@ Multi-step prompts join with `then` (bare commas would split numbers like `1,000
 - `/agent` single-step prompts (HOLDER: multi-step with `then` chains)
 
 The gate reads your active wallet's $CLAWNCH balance via `eth_call`, caches the result for 60s, and never crashes a command on RPC error (transient failures fall back to free tier). Implementation in `clawmes/services/token_gate.py`.
+
+### Clawmes Unlimited (v0.11.0)
+
+A third tier above HOLDER for the most aggressive features. Hold **100,000,000+ $CLAWNCH** (~$1,050 at session-time price) to unlock:
+
+```
+/sniper add 0.005 --max-buys 5 --source clawmes --symbol-filter DOG|CAT
+                            # auto-buy new Clawnch launches matching filters
+/sniper add 0.01 --max-age 60 --slippage 200
+                            # snipe any launch < 60s old at 2% slippage
+/sniper list / pause / resume / cancel / edit / history / status
+
+/agent --ai sweep my LP rewards then buy some clawnch
+                            # LLM fallback when the regex parser can't match
+                            # (regex runs first; LLM only sees what didn't parse)
+```
+
+- **`/sniper`** watches `/api/launches` on the registry tick and fires `defi_swap` buys for any newly-detected launch matching the configured filters. Filters compose: `--source` attribution, `--symbol-filter` regex, `--max-mcap` skip threshold, `--max-age` recency window (default 10min — older launches are presumed already sniped). Auto-exhausts after `--max-buys` (default 10) so a runaway launchpad can't drain your wallet. `SniperSchedulerService` drives the loop.
+- **`/agent --ai`** layers on top of the existing intent matcher. The regex parser runs first; the LLM only sees segments that didn't match. Rewrites are re-validated through the same `_parse_one` path so the LLM can't smuggle invented commands. Powered by OpenGateway; falls back gracefully when OpenGateway errors.
 
 ### Trader power-pack (v0.10.0)
 

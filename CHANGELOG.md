@@ -6,6 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.11.0 — 2026-05-27
+
+### Added — Clawmes Unlimited: autopilot tier + `/sniper` + `/agent --ai`
+
+A new top tier and two extreme features that live behind it.
+
+- **`UNLIMITED` tier** — any wallet holding **100,000,000+ $CLAWNCH**
+  (~$1,050 at session-time price). Sits above `HOLDER` (10M+) and
+  unlocks autopilot features that go beyond what a normal trader
+  needs. The Tier enum is now ordered (FREE=0 < HOLDER=1 <
+  UNLIMITED=2); checks use `tier.value >= required.value` so an
+  UNLIMITED holder automatically passes any HOLDER gate.
+
+- **`/sniper`** — auto-buy newly-launched Clawnch tokens.
+  - `/sniper add <eth_amount> [--max-buys N] [--source X]
+    [--symbol-filter <regex>] [--max-mcap <usd>] [--max-age <seconds>]
+    [--slippage <bps>]`
+  - Watches `/api/launches` on the registry tick. Any new launch
+    matching the filters triggers a `defi_swap` buy at the configured
+    ETH amount.
+  - Filters compose: source attribution (`clawmes` / `clawncher` /
+    `4claw` / `moltbook`), symbol regex, max market cap, max age
+    (default 10min — older launches are presumed already sniped).
+  - Auto-exhausts after `--max-buys` snipes (default 10). Per-snipe
+    slippage cap. Per-config errors caught internally.
+  - `SniperSchedulerService` (id `clawmes.sniper_scheduler`) drives
+    the loop. UNLIMITED tier required to `/sniper add`.
+
+- **`/agent --ai`** — LLM fallback for prompts the regex parser can't
+  understand. Layered on top of the existing intent matcher: regex
+  runs first, the LLM only sees segments that didn't match.
+  - The LLM is constrained to rewrite each segment as one of the
+    supported phrasings; rewrites are re-validated through `_parse_one`
+    so the LLM can't invent new commands.
+  - Powered by the existing OpenGateway service. Falls back gracefully
+    when OpenGateway is unreachable / errors — original "couldn't
+    parse" message displays.
+  - UNLIMITED tier required.
+
+### Internal
+
+- `clawmes/services/token_gate.py` — `UNLIMITED_THRESHOLD =
+  100_000_000` constant added. Tier enum reordered (now numeric values
+  for ranked comparison). `_TIER_THRESHOLD_TOKENS` + `_TIER_LABELS`
+  internal maps so error messages mention "Holder tier" vs "Clawmes
+  Unlimited" correctly.
+- `clawmes/commands/sniper.py` + `clawmes/services/sniper_scheduler.py`.
+- `clawmes/commands/agent_plan.py` extended with `_llm_extract` +
+  `_extract_llm_text` helpers and `use_ai` parameter on `_cmd_parse`.
+- 3984 tests pass at 100% coverage (was 3831). README counts: 88 →
+  89 commands, 28 → 29 services.
+
 ## 0.10.1 — 2026-05-27
 
 ### Changed — HOLDER tier threshold raised 10k → 10M $CLAWNCH

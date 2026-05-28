@@ -37,6 +37,7 @@ from clawmes.commands import (
     onramp,
     plans,
     policy,
+    sniper,
     trending,
     tx,
     wallet,
@@ -83,6 +84,7 @@ def register_all(ctx) -> None:
     agent_plan.register(ctx)
     alerts.register(ctx)
     limit_order.register(ctx)
+    sniper.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel

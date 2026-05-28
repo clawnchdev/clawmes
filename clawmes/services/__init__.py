@@ -61,6 +61,7 @@ def start_all() -> None:
     from clawmes.services.persona_service import get_persona_service
     from clawmes.services.price import get_price_service
     from clawmes.services.rpc import get_rpc_service
+    from clawmes.services.sniper_scheduler import get_sniper_scheduler_service
     from clawmes.services.token_decimals import get_token_decimals_service
     from clawmes.services.token_gate import get_token_gate_service
     from clawmes.services.wallet import get_wallet_service
@@ -154,6 +155,10 @@ def start_all() -> None:
         #     orders against current USD prices and fires swaps via
         #     defi_swap when thresholds are crossed.
         get_limit_order_scheduler_service,
+        # 7e. Sniper scheduler — ticking=True. Polls /api/launches and
+        #     fires defi_swap buys for new launches matching each
+        #     UNLIMITED-tier config's filters.
+        get_sniper_scheduler_service,
         get_wc_notification_consumer,  # threaded; routes WC bridge notifs
     ]
     for factory in factories:

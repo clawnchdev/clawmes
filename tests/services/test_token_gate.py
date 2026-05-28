@@ -52,7 +52,8 @@ class TestLifecycle:
         svc = token_gate.get_token_gate_service()
         h = svc.health()
         assert h["id"] == "clawmes.token_gate"
-        assert h["threshold_clawnch"] == token_gate.HOLDER_THRESHOLD
+        assert h["holder_threshold_clawnch"] == token_gate.HOLDER_THRESHOLD
+        assert h["unlimited_threshold_clawnch"] == token_gate.UNLIMITED_THRESHOLD
         assert h["status"] == "stopped"
         svc.start()
         assert svc.health()["status"] == "running"
@@ -74,12 +75,20 @@ class TestResolveTier:
         assert tier == token_gate.Tier.FREE
 
     def test_holder_above_threshold(self, monkeypatch):
-        # Mock balance reader to return 11M $CLAWNCH (above the 10M threshold).
+        # Mock balance reader to return 11M $CLAWNCH (above the 10M threshold,
+        # below the 100M UNLIMITED threshold).
         monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 11_000_000 * (10**18))
         svc = token_gate.get_token_gate_service()
         tier, bal = svc.resolve_tier("0x" + "a" * 40)
         assert tier == token_gate.Tier.HOLDER
         assert bal == 11_000_000 * (10**18)
+
+    def test_unlimited_above_threshold(self, monkeypatch):
+        # Mock balance reader to return 150M $CLAWNCH (above UNLIMITED 100M).
+        monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 150_000_000 * (10**18))
+        svc = token_gate.get_token_gate_service()
+        tier, _ = svc.resolve_tier("0x" + "a" * 40)
+        assert tier == token_gate.Tier.UNLIMITED
 
     def test_free_below_threshold(self, monkeypatch):
         monkeypatch.setattr(token_gate, "_read_clawnch_balance", lambda a: 5_000_000 * (10**18))
