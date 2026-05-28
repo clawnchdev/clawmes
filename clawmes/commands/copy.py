@@ -103,7 +103,14 @@ def _short(value: str) -> str:
 
 
 def _split_flags(parts: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Mirror of ``dca._split_flags`` — positional + ``--flag value`` pairs."""
+    """Mirror of ``dca._split_flags`` — positional + ``--flag value`` pairs.
+
+    Bare flags (no value) are supported: if the next token is another
+    ``--flag`` or there is no next token, the current flag captures an
+    empty string. This lets ``--invert`` and other booleans coexist with
+    value flags like ``--blocklist <list>`` without the boolean swallowing
+    the next flag's name.
+    """
     positional: list[str] = []
     flags: dict[str, str] = {}
     i = 0
@@ -111,9 +118,13 @@ def _split_flags(parts: list[str]) -> tuple[list[str], dict[str, str]]:
         tok = parts[i]
         if tok.startswith("--"):
             name = tok[2:]
-            value = parts[i + 1] if i + 1 < len(parts) else ""
-            flags[name] = value
-            i += 2
+            next_tok = parts[i + 1] if i + 1 < len(parts) else None
+            if next_tok is not None and not next_tok.startswith("--"):
+                flags[name] = next_tok
+                i += 2
+            else:
+                flags[name] = ""
+                i += 1
         else:
             positional.append(tok)
             i += 1
@@ -184,9 +195,11 @@ def _render_usage() -> str:
         "      [--slippage <bps>] [--daily-cap <eth>]\n"
         "      [--max-total <eth>] [--max-failures <n>]\n"
         "      [--blocklist <0xa,0xb,…>] [--pct <N>]\n"
+        "      [--invert] [--multi <0xa,0xb,…>]\n"
         "                          Follow a wallet's buys. --pct scales each\n"
-        "                          copy to N%% of target's outgoing ETH,\n"
-        "                          capped at <eth_per_copy>. (HOLDER tier)\n"
+        "                          copy to N%% of target's outgoing ETH (HOLDER).\n"
+        "                          --invert also mirrors sells (HOLDER).\n"
+        "                          --multi follows multiple wallets (UNLIMITED).\n"
         "  /copy list              Show your follows + last activity\n"
         "  /copy pause <id>        Suspend without losing state\n"
         "  /copy resume <id>       Re-arm a paused follow\n"
@@ -296,6 +309,38 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         if pct <= 0 or pct > 1000:
             return f"--pct must be between 0 and 1000 (got {pct})."
 
+    # Invert: also mirror SELLS from the watched wallet. When the wallet
+    # sends a token OUT (to a DEX router, presumably to sell), we check
+    # our balance for that token and submit a corresponding sell on our
+    # side. HOLDER tier — captures "whale exiting" signal.
+    invert = False
+    if "invert" in flags:
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        gate_err = check_tier_or_error(Tier.HOLDER, feature="/copy --invert (mirror sells)")
+        if gate_err:
+            return gate_err
+        invert = True
+
+    # Multi-wallet: one follow tracks multiple wallets at once. The
+    # `wallet` field stays the primary; `extra_wallets` carries the
+    # rest. Polling iterates over all of them. UNLIMITED tier.
+    extra_wallets: list[str] = []
+    if "multi" in flags:
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        gate_err = check_tier_or_error(Tier.UNLIMITED, feature="/copy --multi (multiple wallets)")
+        if gate_err:
+            return gate_err
+        raw_multi = flags["multi"]
+        for w in raw_multi.split(","):
+            w = w.strip()
+            if not w:
+                continue
+            if not (w.startswith("0x") and len(w) == 42):
+                return f"--multi wallet must be a 0x… address (got {w!r})."
+            extra_wallets.append(w.lower())
+
     blocklist = _parse_blocklist(flags.get("blocklist", ""))
 
     # Seed last_seen_block from the current chain head. We default to a
@@ -312,8 +357,10 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         "id": follow_id,
         "sender_id": sender_id,
         "wallet": wallet.lower(),
+        "extra_wallets": extra_wallets,
         "eth_per_copy": eth_per_copy,
         "pct": pct,
+        "invert": invert,
         "slippage_bps": slippage_bps,
         "daily_cap_eth": daily_cap_eth,
         "max_eth_total": max_eth_total,
@@ -329,13 +376,17 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
     _save_state(state)
 
     pct_line = f"  Pct sizing:  {pct}% of target tx\n" if pct is not None else ""
+    multi_line = f"  Multi:       {len(extra_wallets)} extra wallet(s)\n" if extra_wallets else ""
+    invert_line = "  Invert:      mirror sells too\n" if invert else ""
     return (
         f"Follow added: {follow_id}\n"
         f"  Wallet:      {wallet}\n"
-        f"  Per copy:    {eth_per_copy} ETH"
+        + multi_line
+        + f"  Per copy:    {eth_per_copy} ETH"
         + (" (floor)" if pct is not None else "")
         + "\n"
         + pct_line
+        + invert_line
         + f"  Slippage:    {slippage_bps} bps\n"
         f"  Daily cap:   {daily_cap_eth if daily_cap_eth is not None else 'none'}\n"
         f"  Total cap:   {max_eth_total if max_eth_total is not None else 'none'}\n"
@@ -344,7 +395,7 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         f"  Last block:  {last_block}\n"
         "\n"
         "The copy-trader service polls Basescan every ~60s and submits a buy\n"
-        "whenever the followed wallet receives a non-blocklisted token. Use\n"
+        "whenever a watched wallet receives a non-blocklisted token. Use\n"
         "/copy list to see all your follows."
     )
 
@@ -407,6 +458,8 @@ _EDITABLE = {
     "max_eth_total",
     "max_consecutive_failures",
     "blocklist",
+    "invert",
+    "extra_wallets",
 }
 
 
@@ -468,6 +521,44 @@ def _cmd_edit(sender_id: str, parts: list[str]) -> str:
         if v < 1:
             return f"max_consecutive_failures must be >= 1 (got {v})."
         follow["max_consecutive_failures"] = v
+    elif field == "invert":
+        # Accept true/false/yes/no/on/off. HOLDER tier required to flip ON.
+        truthy = {"true", "yes", "on", "1"}
+        falsy = {"false", "no", "off", "0"}
+        v_lower = value.lower()
+        if v_lower in truthy:
+            from clawmes.services.token_gate import Tier, check_tier_or_error
+
+            gate_err = check_tier_or_error(Tier.HOLDER, feature="/copy --invert (mirror sells)")
+            if gate_err:
+                return gate_err
+            follow["invert"] = True
+        elif v_lower in falsy:
+            follow["invert"] = False
+        else:
+            return f"invert must be true|false (got {value!r})."
+    elif field == "extra_wallets":
+        # Comma-separated list of additional wallet addresses; "none"
+        # clears. UNLIMITED tier required to add any extras.
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        if value.lower() == "none":
+            follow["extra_wallets"] = []
+        else:
+            gate_err = check_tier_or_error(
+                Tier.UNLIMITED, feature="/copy --multi (multiple wallets)"
+            )
+            if gate_err:
+                return gate_err
+            extras: list[str] = []
+            for w in value.split(","):
+                w = w.strip()
+                if not w:
+                    continue
+                if not (w.startswith("0x") and len(w) == 42):
+                    return f"extra_wallets entry must be 0x… address (got {w!r})."
+                extras.append(w.lower())
+            follow["extra_wallets"] = extras
     else:  # blocklist
         follow["blocklist"] = _parse_blocklist(value)
 
@@ -517,64 +608,132 @@ def _run_due_with_lines() -> tuple[int, list[str]]:
 
 
 def _process_follow(follow: dict[str, Any], lines: list[str]) -> int:
-    """Poll Basescan for new ERC-20 receipts on the followed wallet."""
-    txs = _basescan_token_receipts(
-        follow["wallet"], start_block=int(follow.get("last_seen_block", 0)) + 1
-    )
-    if not txs:
-        return 0
+    """Poll Basescan for new transfers on every watched wallet.
 
-    # Cap per-tick processing so a wallet that just received an airdrop
-    # to 500 tokens doesn't cause us to submit 500 buys.
-    txs = txs[:_MAX_TX_PER_TICK]
+    Iterates over the primary ``wallet`` plus any ``extra_wallets``
+    (multi-wallet follow). For each watched address:
+
+    * INCOMING transfers (``to == wallet``) → trigger a buy on our
+      side. Default copy behavior.
+    * OUTGOING transfers (``from == wallet``) → only processed when
+      ``invert`` is set on the follow. Treated as sell signals;
+      we sell our own balance of the token via ``_execute_sell``.
+    """
+    wallets = _all_watched_wallets(follow)
+    start_block = int(follow.get("last_seen_block", 0)) + 1
+    invert = bool(follow.get("invert"))
     blocklist = set(follow.get("blocklist", []))
     count = 0
     max_block = int(follow.get("last_seen_block", 0))
 
-    for tx in txs:
-        token = (tx.get("contractAddress") or "").lower()
-        if not token or len(token) != 42:
+    for wallet in wallets:
+        if invert:
+            txs = _basescan_token_transfers_all(wallet, start_block=start_block)
+        else:
+            txs = _basescan_token_receipts(wallet, start_block=start_block)
+        if not txs:
             continue
-        block_no = int(tx.get("blockNumber", 0))
-        if block_no > max_block:
-            max_block = block_no
-        if token in blocklist:
-            lines.append(f"  {follow['id']}  skipped {_short(token)} (blocklisted)")
-            follow["executions"].append(
-                {
-                    "at": _now_iso(),
-                    "tx_seen": tx.get("hash", ""),
-                    "token": token,
-                    "result": {"status": "blocklisted", "detail": "in follow blocklist"},
-                }
-            )
-            continue
+        # Cap per-tick processing per wallet so a single wallet's airdrop
+        # burst can't crowd out the rest.
+        txs = txs[:_MAX_TX_PER_TICK]
+        wallet_lower = wallet.lower()
 
-        # Compute the actual ETH amount for THIS copy. With --pct set,
-        # scale to the target wallet's outgoing ETH on the seen tx,
-        # capped at the configured eth_per_copy. Without --pct, the
-        # configured eth_per_copy is used as-is.
-        eth_for_copy = _compute_copy_amount(follow, tx)
-        result = _execute_copy(follow, token, eth_amount=eth_for_copy)
-        follow["executions"].append(
-            {
-                "at": _now_iso(),
-                "tx_seen": tx.get("hash", ""),
-                "token": token,
-                "eth_amount": eth_for_copy,
-                "result": result,
-            }
-        )
-        if result.get("status") == "ok":
-            follow["total_eth_spent"] = float(follow.get("total_eth_spent", 0.0)) + eth_for_copy
-            count += 1
-        lines.append(
-            f"  {follow['id']}  {result.get('status')}  {_short(token)}  {result.get('detail', '')}"
-        )
+        for tx in txs:
+            token = (tx.get("contractAddress") or "").lower()
+            if not token or len(token) != 42:
+                continue
+            block_no = int(tx.get("blockNumber", 0))
+            if block_no > max_block:
+                max_block = block_no
+
+            tx_to = (tx.get("to") or "").lower()
+            tx_from = (tx.get("from") or "").lower()
+            is_incoming = tx_to == wallet_lower
+            is_outgoing = tx_from == wallet_lower and tx_to != wallet_lower
+
+            if token in blocklist:
+                lines.append(f"  {follow['id']}  skipped {_short(token)} (blocklisted)")
+                follow["executions"].append(
+                    {
+                        "at": _now_iso(),
+                        "tx_seen": tx.get("hash", ""),
+                        "watched_wallet": wallet_lower,
+                        "token": token,
+                        "result": {
+                            "status": "blocklisted",
+                            "detail": "in follow blocklist",
+                        },
+                    }
+                )
+                continue
+
+            if is_incoming:
+                eth_for_copy = _compute_copy_amount(follow, tx)
+                result = _execute_copy(follow, token, eth_amount=eth_for_copy)
+                follow["executions"].append(
+                    {
+                        "at": _now_iso(),
+                        "tx_seen": tx.get("hash", ""),
+                        "watched_wallet": wallet_lower,
+                        "direction": "buy",
+                        "token": token,
+                        "eth_amount": eth_for_copy,
+                        "result": result,
+                    }
+                )
+                if result.get("status") == "ok":
+                    follow["total_eth_spent"] = (
+                        float(follow.get("total_eth_spent", 0.0)) + eth_for_copy
+                    )
+                    count += 1
+                lines.append(
+                    f"  {follow['id']}  buy  {result.get('status')}  "
+                    f"{_short(token)}  {result.get('detail', '')}"
+                )
+            elif is_outgoing and invert:
+                result = _execute_sell(follow, token)
+                follow["executions"].append(
+                    {
+                        "at": _now_iso(),
+                        "tx_seen": tx.get("hash", ""),
+                        "watched_wallet": wallet_lower,
+                        "direction": "sell",
+                        "token": token,
+                        "result": result,
+                    }
+                )
+                if result.get("status") == "ok":
+                    count += 1
+                lines.append(
+                    f"  {follow['id']}  sell {result.get('status')}  "
+                    f"{_short(token)}  {result.get('detail', '')}"
+                )
+            # else: tx neither incoming nor outgoing to/from this
+            # watched wallet (e.g. internal transfers we shouldn't act
+            # on) — silently skip.
 
     follow["last_seen_block"] = max_block
     _maybe_auto_pause(follow)
     return count
+
+
+def _all_watched_wallets(follow: dict[str, Any]) -> list[str]:
+    """Primary + extras, normalized + deduplicated."""
+    seen: set[str] = set()
+    out: list[str] = []
+    primary = (follow.get("wallet") or "").lower()
+    if primary:
+        seen.add(primary)
+        out.append(primary)
+    for w in follow.get("extra_wallets", []) or []:
+        if not isinstance(w, str):
+            continue
+        wl = w.lower()
+        if wl in seen:
+            continue
+        seen.add(wl)
+        out.append(wl)
+    return out
 
 
 def _maybe_auto_pause(follow: dict[str, Any]) -> None:
@@ -737,6 +896,84 @@ def _execute_copy(
     return {"status": "ok", "detail": f"tx {tx_hash[:14]}…", "tx_hash": tx_hash}
 
 
+def _execute_sell(follow: dict[str, Any], token: str) -> dict[str, Any]:
+    """Sell our balance of ``token`` back to ETH (invert mode).
+
+    Behavior:
+    * If we hold zero of the token, return ``no_balance`` — silent no-op.
+    * Otherwise submit ``defi_swap`` with sell_token=token, buy_token=ETH,
+      sell_amount=our_balance.
+
+    The sell amount uses 100% of our current token balance. We don't
+    try to scale via ``--pct`` because the typical "whale exit"
+    signal is "the wallet is done with this position"; a partial sell
+    doesn't match the signal.
+    """
+    from clawmes.services.wallet import get_wallet_state
+
+    wstate = get_wallet_state()
+    if not wstate.connected:
+        return {"status": "no_wallet", "detail": "no wallet connected", "tx_hash": ""}
+
+    balance_wei = _read_our_token_balance(token, wstate.address)
+    if balance_wei <= 0:
+        return {
+            "status": "no_balance",
+            "detail": "we don't hold this token",
+            "tx_hash": "",
+        }
+
+    try:
+        from clawmes.tools.defi_swap import defi_swap
+
+        raw = defi_swap(
+            {
+                "action": "swap",
+                "sell_token": token,
+                "buy_token": "ETH",
+                "sell_amount_wei": str(balance_wei),
+                "slippage_bps": int(follow.get("slippage_bps") or _DEFAULT_SLIPPAGE_BPS),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "detail": str(exc), "tx_hash": ""}
+
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"status": "error", "detail": f"bad swap response: {raw}", "tx_hash": ""}
+    if payload.get("isError"):
+        msg = payload.get("content", [{}])[0].get("text", "swap failed")
+        return {"status": "error", "detail": msg, "tx_hash": ""}
+
+    details = payload.get("details") or {}
+    tx_hash = details.get("tx_hash") or details.get("txHash") or ""
+    return {"status": "ok", "detail": f"sold via tx {tx_hash[:14]}…", "tx_hash": tx_hash}
+
+
+def _read_our_token_balance(token: str, address: str | None) -> int:
+    """Read our balance of ``token`` via ``balanceOf`` eth_call.
+
+    Returns 0 on any error — invert mode treats unknown balances as
+    "don't sell" rather than risking an erroneous tx.
+    """
+    if not address:
+        return 0
+    try:
+        from clawmes.lib.abi import decode_uint, encode_balance_of
+        from clawmes.services.rpc import get_rpc_service
+
+        rpc = get_rpc_service()
+        raw = rpc.eth_call(
+            to=token,
+            data=encode_balance_of(address),
+            chain_id=8453,
+        )
+        return decode_uint(raw)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 # ── Basescan polling ────────────────────────────────────────────────
 
 
@@ -773,6 +1010,48 @@ def _basescan_token_receipts(wallet: str, *, start_block: int) -> list[dict[str,
         x for x in result if isinstance(x, dict) and (x.get("to") or "").lower() == wallet.lower()
     ]
     return incoming
+
+
+def _basescan_token_transfers_all(wallet: str, *, start_block: int) -> list[dict[str, Any]]:
+    """Return ERC-20 transfers BOTH directions for ``wallet``.
+
+    Used by invert-mode follows: incoming transfers map to "buy on our
+    side" and outgoing transfers map to "sell on our side". Caller
+    classifies each entry by comparing ``from`` / ``to`` against the
+    watched wallet.
+    """
+    params = {
+        "module": "account",
+        "action": "tokentx",
+        "address": wallet,
+        "startblock": str(start_block),
+        "endblock": "99999999",
+        "sort": "asc",
+    }
+    api_key = os.environ.get("BASESCAN_API_KEY")
+    if api_key:
+        params["apikey"] = api_key
+
+    body = http_get(_BASESCAN_BASE, params=params, timeout=20.0)
+    if not isinstance(body, dict):
+        return []
+    if str(body.get("status")) != "1":
+        return []
+    result = body.get("result")
+    if not isinstance(result, list):
+        return []
+    wallet_lower = wallet.lower()
+    # Both directions: from == wallet OR to == wallet. Drop everything else.
+    relevant = [
+        x
+        for x in result
+        if isinstance(x, dict)
+        and (
+            (x.get("to") or "").lower() == wallet_lower
+            or (x.get("from") or "").lower() == wallet_lower
+        )
+    ]
+    return relevant
 
 
 def _current_block_height() -> int:

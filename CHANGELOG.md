@@ -6,6 +6,66 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.12.0 — 2026-05-28
+
+### Added — paid-tier expansions
+
+Four feature additions across existing commands, expanding what each
+paid tier unlocks.
+
+- **`/copy --invert`** (HOLDER) — also mirror SELLS from the watched
+  wallet. When the wallet sends an ERC-20 OUT (to a DEX router,
+  presumably to sell), we check our balance for that token and
+  submit a corresponding sell on our side. Captures the "whale
+  exiting" signal so followers can ride down with the leader too,
+  not just on the way up.
+
+- **`/copy --multi <0xa,0xb,…>`** (UNLIMITED) — follow multiple
+  wallets in one follow record. The primary wallet is the first
+  argument; extras come from `--multi`. The poller iterates over
+  all of them on each tick. Combined with `--invert` you can build
+  "watch this cohort of whales; copy buys + sells from any of them."
+
+- **`/alerts add … --webhook <url>`** (HOLDER) — POST a JSON payload
+  to the configured URL when the alert fires. Payload includes
+  `alert_id`, `sender_id`, `type`, `fired_at`, `detail`, and the
+  full fire metadata. Webhook delivery never blocks or breaks the
+  alert tick — failures are recorded on the fire history.
+
+- **`/sniper --auto-sell <gain_pct>:<loss_pct>`** (UNLIMITED) — full
+  lifecycle automation. After each successful snipe, the config
+  registers an auto-sell watch anchored to the buy-time USD price.
+  On subsequent ticks the scheduler polls the token's price; when
+  the price moves up by `gain_pct` (take-profit) or down by
+  `loss_pct` (stop-loss), the watch fires a sell-our-balance
+  transaction. The watch transitions to `filled` on success or
+  `close_failed` if the sell fails.
+
+### Internal
+
+- `_split_flags` in `copy.py` / `sniper.py` / `alerts.py` rewritten
+  to handle bare flags. Now peeks at the next token: if it's another
+  `--flag` or doesn't exist, the current flag captures an empty
+  string. Fixes a latent bug where `--invert` silently swallowed the
+  next `--flag` as its value.
+- `clawmes/commands/copy.py`: new `_all_watched_wallets`,
+  `_basescan_token_transfers_all`, `_execute_sell`,
+  `_read_our_token_balance`. `_process_follow` refactored to iterate
+  primary + extra wallets and dispatch on transfer direction.
+  `_EDITABLE` extended with `invert` + `extra_wallets`.
+- `clawmes/commands/alerts.py`: new `_split_alert_flags`,
+  `_post_webhook`. Add helpers now thread `webhook_url` through to
+  the persisted alert; tick loop POSTs on fire and records delivery
+  status.
+- `clawmes/commands/sniper.py`: new `_fetch_price`,
+  `_evaluate_auto_sell_watches`, `_submit_token_sell`,
+  `_read_our_token_balance`. `_run_due_with_lines` extended to
+  evaluate auto-sell watches after the main snipe loop. Successful
+  snipes anchor a watch at the buy-time price.
+- 4068 tests pass at 100% coverage (was 3984). README unchanged on
+  the counts row — all additions are flags / behaviors on existing
+  commands.
+
 ## 0.11.0 — 2026-05-27
 
 ### Added — Clawmes Unlimited: autopilot tier + `/sniper` + `/agent --ai`

@@ -189,16 +189,50 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         return cap_err
 
     kind = parts[0].lower()
+    pos, flags = _split_alert_flags(parts[1:])
+    webhook_url = flags.get("webhook")
+    if webhook_url:
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        gate_err = check_tier_or_error(Tier.HOLDER, feature="/alerts --webhook delivery")
+        if gate_err:
+            return gate_err
+        if not (webhook_url.startswith("http://") or webhook_url.startswith("https://")):
+            return f"--webhook must be an http(s):// URL (got {webhook_url!r})."
+
     if kind == "price":
-        return _add_price(sender_id, parts[1:])
+        return _add_price(sender_id, pos, webhook_url=webhook_url)
     if kind == "wallet":
-        return _add_wallet(sender_id, parts[1:])
+        return _add_wallet(sender_id, pos, webhook_url=webhook_url)
     return f"Unknown alert type {kind!r}. Use 'price' or 'wallet'."
 
 
-def _add_price(sender_id: str, parts: list[str]) -> str:
+def _split_alert_flags(parts: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Same shape as ``/copy._split_flags`` — value flags consume the next token
+    unless it's another flag, in which case the current flag is treated as bare."""
+    positional: list[str] = []
+    flags: dict[str, str] = {}
+    i = 0
+    while i < len(parts):
+        tok = parts[i]
+        if tok.startswith("--"):
+            name = tok[2:]
+            next_tok = parts[i + 1] if i + 1 < len(parts) else None
+            if next_tok is not None and not next_tok.startswith("--"):
+                flags[name] = next_tok
+                i += 2
+            else:
+                flags[name] = ""
+                i += 1
+        else:
+            positional.append(tok)
+            i += 1
+    return positional, flags
+
+
+def _add_price(sender_id: str, parts: list[str], *, webhook_url: str | None = None) -> str:
     if len(parts) < 3:
-        return "Usage: /alerts add price <token> <above|below> <usd>"
+        return "Usage: /alerts add price <token> <above|below> <usd> [--webhook <url>]"
     token, direction, usd_raw = parts[0], parts[1].lower(), parts[2]
     if direction not in ("above", "below"):
         return f"direction must be 'above' or 'below' (got {direction!r})."
@@ -218,27 +252,30 @@ def _add_price(sender_id: str, parts: list[str]) -> str:
         "token": token,
         "direction": direction,
         "threshold_usd": threshold_usd,
+        "webhook_url": webhook_url,
         "status": "active",
         "created_at": _now_iso(),
         "fires": [],
     }
     state["alerts"].append(alert)
     _save_state(state)
+    webhook_line = f"  Webhook:   {webhook_url}\n" if webhook_url else ""
     return (
         f"Alert added: {alert_id}\n"
         f"  Type:      price\n"
         f"  Token:     {token}\n"
         f"  Trigger:   price {direction} ${threshold_usd}\n"
-        "\n"
-        "The alert scheduler polls prices on the registry cadence (~60s)\n"
-        "and records a fire when the threshold is crossed. Use /alerts list\n"
-        "to see all your alerts."
+        + webhook_line
+        + "\n"
+        + "The alert scheduler polls prices on the registry cadence (~60s)\n"
+        + "and records a fire when the threshold is crossed. Use /alerts list\n"
+        + "to see all your alerts."
     )
 
 
-def _add_wallet(sender_id: str, parts: list[str]) -> str:
+def _add_wallet(sender_id: str, parts: list[str], *, webhook_url: str | None = None) -> str:
     if not parts:
-        return "Usage: /alerts add wallet <address>"
+        return "Usage: /alerts add wallet <address> [--webhook <url>]"
     address = parts[0]
     if not (address.startswith("0x") and len(address) == 42):
         return f"wallet must be a 0x… address (got {address!r})."
@@ -255,6 +292,7 @@ def _add_wallet(sender_id: str, parts: list[str]) -> str:
         "sender_id": sender_id,
         "type": "wallet",
         "wallet": address.lower(),
+        "webhook_url": webhook_url,
         "status": "active",
         "created_at": _now_iso(),
         "last_seen_block": last_block,
@@ -410,12 +448,53 @@ def _run_due_with_lines() -> tuple[int, list[str]]:
                 # last_seen_block advances past the seen tx.
                 if alert.get("type") == "price":
                     alert["status"] = "fired"
+                # HOLDER-tier webhook delivery — POST the fire payload
+                # to the configured URL. Failures are recorded but
+                # don't roll back the fire itself.
+                webhook_url = alert.get("webhook_url")
+                if webhook_url:
+                    delivery = _post_webhook(webhook_url, alert, fired)
+                    alert["fires"][-1]["webhook"] = delivery
                 total += 1
         except Exception as exc:  # noqa: BLE001
             lines.append(f"  {alert['id']}  error: {exc}")
     if total > 0 or any(lines):
         _save_state(state)
     return total, lines
+
+
+def _post_webhook(url: str, alert: dict[str, Any], fired: dict[str, Any]) -> dict[str, Any]:
+    """POST the fire payload to ``url``. Returns a delivery-status dict.
+
+    Never raises. Webhook failure must not block the alert tick.
+    """
+    try:
+        import urllib.request as _req
+
+        body = json.dumps(
+            {
+                "alert_id": alert.get("id"),
+                "sender_id": alert.get("sender_id"),
+                "type": alert.get("type"),
+                "fired_at": _now_iso(),
+                "detail": fired.get("detail"),
+                "fire": fired,
+            }
+        ).encode("utf-8")
+        req = _req.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "clawmes-alerts/1.0",
+            },
+        )
+        with _req.urlopen(req, timeout=10.0) as resp:  # noqa: S310 — user-provided URL
+            status_code = resp.getcode()
+        return {"status": "ok", "http_status": status_code}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "detail": str(exc)}
 
 
 def _check_alert(alert: dict[str, Any]) -> dict[str, Any] | None:
