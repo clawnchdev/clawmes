@@ -289,6 +289,20 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
             return f"--auto-sell values must be positive (got {raw!r})."
         auto_sell = {"gain_pct": gain_pct, "loss_pct": loss_pct}
 
+    # Auto-trail: trailing stop-loss. ``--auto-trail 20`` means "sell if
+    # price drops 20% below the highest point we've seen since buy."
+    # The high-water mark is tracked per-watch and updated on each
+    # tick. Pairs naturally with --auto-sell: take-profit triggers a
+    # full exit immediately, while auto-trail lets winners run.
+    auto_trail_pct: float | None = None
+    if "auto-trail" in flags:
+        try:
+            auto_trail_pct = float(flags["auto-trail"])
+        except ValueError:
+            return f"--auto-trail must be a number (got {flags['auto-trail']!r})."
+        if auto_trail_pct <= 0 or auto_trail_pct >= 100:
+            return f"--auto-trail must be between 0 and 100 exclusive (got {auto_trail_pct})."
+
     state = _load_state()
     config_id = _new_id()
     config = {
@@ -297,6 +311,7 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         "eth_amount": eth_amount,
         "max_buys": max_buys,
         "buys_made": 0,
+        "auto_trail_pct": auto_trail_pct,
         "slippage_bps": slippage_bps,
         "source_filter": source,
         "symbol_filter": symbol_filter,
@@ -317,6 +332,9 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         if auto_sell
         else ""
     )
+    auto_trail_line = (
+        f"  Auto-trail:     {auto_trail_pct}% trailing stop\n" if auto_trail_pct is not None else ""
+    )
     return (
         f"Sniper added: {config_id}\n"
         f"  Per snipe:      {eth_amount} ETH\n"
@@ -327,6 +345,7 @@ def _cmd_add(sender_id: str, parts: list[str]) -> str:
         f"  Max mcap:       {f'${max_mcap}' if max_mcap is not None else 'any'}\n"
         f"  Max age:        {max_age}s (ignore launches older than this)\n"
         + auto_sell_line
+        + auto_trail_line
         + "\n"
         + "The sniper service polls /api/launches on the registry tick (~60s)\n"
         + "and fires a buy on each newly-detected launch that matches the\n"
@@ -611,9 +630,11 @@ def _process_config(
             config["buys_made"] += 1
             count += 1
             # On successful snipe, register an auto-sell watch if
-            # configured. The watch records the buy-time price as
-            # anchor so subsequent ticks can compare deltas.
-            if config.get("auto_sell"):
+            # auto_sell OR auto_trail_pct is configured. The watch
+            # records the buy-time price as anchor so subsequent ticks
+            # can compare deltas, and ``high_water_price_usd`` tracks
+            # the running max for trailing-stop math.
+            if config.get("auto_sell") or config.get("auto_trail_pct") is not None:
                 buy_price = _fetch_price(addr.lower())
                 if buy_price is not None and buy_price > 0:
                     config.setdefault("auto_sell_watches", []).append(
@@ -621,6 +642,7 @@ def _process_config(
                             "token": addr.lower(),
                             "symbol": symbol,
                             "buy_price_usd": buy_price,
+                            "high_water_price_usd": buy_price,
                             "created_at": _now_iso(),
                             "status": "active",
                         }
@@ -685,18 +707,27 @@ def _evaluate_auto_sell_watches(config: dict[str, Any], lines: list[str]) -> int
     For each watch:
 
       * Read current USD price via ``_fetch_price``.
-      * Compute pct change from buy-time anchor.
-      * If pct >= ``gain_pct`` (take-profit) or pct <= ``-loss_pct``
-        (stop-loss), sell our balance and mark the watch ``filled``.
+      * Update ``high_water_price_usd`` if current price exceeds it
+        (used by auto-trail).
+      * Compute pct change from buy-time anchor (for take-profit /
+        stop-loss) and from high-water mark (for trailing-stop).
+      * If take-profit / stop-loss / trailing-stop triggers, sell our
+        balance and mark the watch ``filled``.
+
+    Trigger priority: take_profit → trailing_stop → stop_loss. So a
+    schedule with both --auto-sell and --auto-trail takes the highest-
+    priority trigger that fires first.
 
     Returns the count of sells executed.
     """
     watches = config.get("auto_sell_watches", [])
     auto_sell = config.get("auto_sell")
-    if not watches or not auto_sell:
+    auto_trail_pct_raw = config.get("auto_trail_pct")
+    if not watches or (not auto_sell and auto_trail_pct_raw is None):
         return 0
-    gain_pct = float(auto_sell.get("gain_pct", 0))
-    loss_pct = float(auto_sell.get("loss_pct", 0))
+    gain_pct = float(auto_sell.get("gain_pct", 0)) if auto_sell else None
+    loss_pct = float(auto_sell.get("loss_pct", 0)) if auto_sell else None
+    trail_pct = float(auto_trail_pct_raw) if auto_trail_pct_raw is not None else None
     sold = 0
     for watch in watches:
         if watch.get("status") != "active":
@@ -705,12 +736,23 @@ def _evaluate_auto_sell_watches(config: dict[str, Any], lines: list[str]) -> int
         if current is None or current <= 0:
             continue
         buy_price = float(watch["buy_price_usd"])
+        # Track running max for trailing-stop math. Older watches
+        # written before v0.13.0 may not have ``high_water_price_usd``;
+        # default to the buy price so the first tick anchors it.
+        high_water = float(watch.get("high_water_price_usd") or buy_price)
+        if current > high_water:
+            high_water = current
+            watch["high_water_price_usd"] = high_water
         delta_pct = (current - buy_price) / buy_price * 100.0
-        triggered = (
-            (delta_pct >= gain_pct and "take_profit")
-            or (delta_pct <= -loss_pct and "stop_loss")
-            or None
-        )
+        trail_drawdown_pct = (current - high_water) / high_water * 100.0 if high_water > 0 else 0.0
+
+        triggered: str | None = None
+        if gain_pct is not None and delta_pct >= gain_pct:
+            triggered = "take_profit"
+        elif trail_pct is not None and trail_drawdown_pct <= -trail_pct:
+            triggered = "trailing_stop"
+        elif loss_pct is not None and delta_pct <= -loss_pct:
+            triggered = "stop_loss"
         if not triggered:
             continue
         # Threshold crossed — sell our balance back to ETH.
@@ -718,6 +760,7 @@ def _evaluate_auto_sell_watches(config: dict[str, Any], lines: list[str]) -> int
         watch["closed_at"] = _now_iso()
         watch["closed_at_price_usd"] = current
         watch["delta_pct"] = delta_pct
+        watch["trail_drawdown_pct"] = trail_drawdown_pct
         watch["close_reason"] = triggered
         watch["close_result"] = result
         if result.get("status") == "ok":
