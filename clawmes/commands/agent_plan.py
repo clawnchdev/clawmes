@@ -208,6 +208,95 @@ def _parse_one(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _llm_extract(
+    failed_segments: list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """LLM fallback for segments the regex parser couldn't understand.
+
+    Sends the failed segments to OpenGateway with a strict-JSON
+    extraction prompt. The LLM returns either a slash-command-equivalent
+    intent or ``null`` for "can't extract." Returns ``(extra_steps,
+    still_failed)``.
+
+    Defensively narrow surface: we never let the LLM invent commands
+    outside the known set, and we re-validate every emitted intent
+    through the same ``_parse_one`` path so the LLM can't smuggle
+    state through a fabricated arg shape.
+    """
+    try:
+        from clawmes.services.opengateway import (
+            OpenGatewayError,
+            get_opengateway_service,
+        )
+    except Exception:  # noqa: BLE001
+        return [], failed_segments
+
+    system_prompt = (
+        "You are a strict intent extractor for clawmes. Given one short "
+        "trading prompt, output a single slash-command equivalent on one "
+        "line, matching one of the supported phrasings exactly, or output "
+        "the literal word `null` if the prompt is not a trading intent.\n\n"
+        "Supported phrasings (output one of these exact shapes):\n"
+        "  dca <amount> eth of <token> every <interval>\n"
+        "  buy <amount> eth of <token>\n"
+        "  copy <0xWallet>\n"
+        "  follow <0xWallet> at <amount> eth\n"
+        "  claim my fees\n"
+        "  claim all\n"
+        "  claim <token>\n"
+        "  burn <amount>\n"
+        "  leaderboard\n"
+        "  top tokens\n"
+        "  top launchers\n"
+        "  show my launches\n"
+        "  balance\n\n"
+        "Output exactly one line. No JSON. No commentary. No quotes."
+    )
+
+    svc = get_opengateway_service()
+    extra: list[dict[str, Any]] = []
+    still_failed: list[str] = []
+    for segment in failed_segments:
+        try:
+            resp = svc.chat_completion(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": segment},
+                ],
+                temperature=0.0,
+                max_tokens=80,
+            )
+        except OpenGatewayError:
+            still_failed.append(segment)
+            continue
+        except Exception:  # noqa: BLE001
+            still_failed.append(segment)
+            continue
+
+        rewritten = _extract_llm_text(resp).strip().strip("`'\"")
+        if not rewritten or rewritten.lower() == "null":
+            still_failed.append(segment)
+            continue
+        step = _parse_one(rewritten)
+        if step is None:
+            still_failed.append(segment)
+            continue
+        extra.append(step)
+    return extra, still_failed
+
+
+def _extract_llm_text(resp: dict[str, Any]) -> str:
+    """Pull the first text content out of an OpenAI-style chat completion."""
+    choices = resp.get("choices") or []
+    if not choices:
+        return ""
+    msg = choices[0].get("message") or {}
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    return ""
+
+
 def _parse_prompt(prompt: str) -> tuple[list[dict[str, Any]], list[str]]:
     """Split on ``then`` (and ``, then``) and parse each segment.
 
@@ -246,7 +335,13 @@ async def handle_agent(raw_args: str, *, sender_id: str = "default", **_kwargs: 
     if not raw:
         out = _render_usage()
     else:
-        sub = raw.split()[0].lower()
+        # Extract --ai flag if present. It's a power-tier feature that
+        # lets the LLM take over when the regex parser doesn't match.
+        use_ai = False
+        if "--ai" in raw.split():
+            use_ai = True
+            raw = " ".join(tok for tok in raw.split() if tok != "--ai")
+        sub = raw.split()[0].lower() if raw else ""
         if sub == "show":
             out = _cmd_show(sender_id)
         elif sub == "confirm":
@@ -255,9 +350,11 @@ async def handle_agent(raw_args: str, *, sender_id: str = "default", **_kwargs: 
             out = _cmd_cancel(sender_id)
         elif sub == "examples":
             out = _render_examples()
+        elif not raw:
+            out = _render_usage()
         else:
             # Treat the whole input as the prompt to parse.
-            out = _cmd_parse(sender_id, raw)
+            out = _cmd_parse(sender_id, raw, use_ai=use_ai)
     _record("agent", raw_args, out)
     return out
 
@@ -267,6 +364,8 @@ def _render_usage() -> str:
         "Natural-language plan compiler.\n"
         "\n"
         "  /agent <prompt>         Parse the prompt, store as draft, show plan\n"
+        "  /agent --ai <prompt>    Same, with LLM fallback for off-template\n"
+        "                          phrasings (Clawmes Unlimited tier)\n"
         "  /agent show             Re-print the current draft\n"
         "  /agent confirm          Execute every step in the draft\n"
         "  /agent cancel           Drop the draft without executing\n"
@@ -315,13 +414,29 @@ def _render_examples() -> str:
     )
 
 
-def _cmd_parse(sender_id: str, prompt: str) -> str:
+def _cmd_parse(sender_id: str, prompt: str, *, use_ai: bool = False) -> str:
     plan, errors = _parse_prompt(prompt)
+
+    # If --ai is set and the regex parser missed any segment, try the
+    # LLM fallback. UNLIMITED tier (Clawmes Unlimited) required.
+    if use_ai:
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        gate_err = check_tier_or_error(Tier.UNLIMITED, feature="/agent --ai")
+        if gate_err:
+            return gate_err
+        if errors:
+            ai_plan, ai_failures = _llm_extract(errors)
+            if ai_plan:
+                plan = plan + ai_plan
+                errors = ai_failures
+
     if not plan and errors:
         return (
             "Couldn't parse the prompt. Segments not understood:\n"
             + "\n".join(f"  - {seg!r}" for seg in errors)
-            + "\n\nTry /agent examples for supported phrasings."
+            + "\n\nTry /agent examples for supported phrasings, "
+            "or /agent --ai <prompt> (Clawmes Unlimited) for LLM-backed parsing."
         )
 
     # Multi-step prompts (2+ parsed steps) require HOLDER tier. Single-

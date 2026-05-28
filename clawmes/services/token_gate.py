@@ -1,6 +1,6 @@
 """Token gating — power features unlock based on $CLAWNCH balance.
 
-Two tiers in v1:
+Three tiers:
 
   * ``free`` — no balance required. Everything you need to onboard and
     play around: ``/buy`` ``/trending`` ``/balance`` ``/leaderboard``
@@ -16,13 +16,25 @@ Two tiers in v1:
       - Unlimited ``/copy`` follows + advanced flags (blocklist, etc.)
       - ``/agent`` multi-step prompts (``then`` chains)
       - Unlimited ``/alerts``
+      - ``/copy --pct`` percentage-based sizing
 
-The gate is intentionally minimal: a single 10M threshold rather than
-a 4-tier ladder. Easy to reason about, easy to test. The threshold
-is meaningful enough to signal real commitment to the ecosystem
-without being prohibitively expensive for serious users. Reviewable
-in one place (:data:`HOLDER_THRESHOLD_WEI`) so we can adjust as the
-price moves without scattering magic numbers.
+  * ``unlimited`` — any wallet holding **at least 100,000,000 $CLAWNCH**
+    (~$1,050 at session-time price). "Clawmes Unlimited" — autopilot
+    tier. Unlocks everything HOLDER gets, plus:
+      - ``/sniper`` — auto-buy newly-launched Clawnch tokens within
+        seconds of detection
+      - ``/agent --ai`` — LLM fallback for unparsed prompts via
+        OpenGateway. Free-form intent extraction layered on top of
+        the regex parser.
+      - Future: priority service tick cadence, mempool-tier ``/copy``
+        latency via Alchemy WS subscribe.
+
+The gate is reviewable in one place (:data:`HOLDER_THRESHOLD_WEI` /
+:data:`UNLIMITED_THRESHOLD_WEI`) so we can adjust as the price moves
+without scattering magic numbers. Tier ordering is intentional: FREE
+< HOLDER < UNLIMITED. ``Tier.value`` is the rank — checks use
+``tier.value >= required.value`` so adding a tier later doesn't
+require rewriting every call site.
 
 Implementation: each gated command imports
 :func:`check_tier_or_error` and calls it before touching state. The
@@ -49,24 +61,33 @@ _log = logger_for("services.token_gate")
 # as a tuple/list here and a "highest tier across all" resolution.
 CLAWNCH_ADDR = "0xa1F72459dfA10BAD200Ac160eCd78C6b77a747be"
 
-# Holder threshold: 10,000,000 $CLAWNCH at 18 decimals = 1e25 wei.
+# Holder threshold: 10,000,000 $CLAWNCH at 18 decimals.
 # At session-time price of ~$0.0000105 / $CLAWNCH, this is ~$105 USD —
 # meaningful enough to function as a real signal of commitment to the
 # ecosystem, accessible enough that any serious user can clear it.
 HOLDER_THRESHOLD = 10_000_000
 HOLDER_THRESHOLD_WEI = HOLDER_THRESHOLD * (10**18)
 
+# Unlimited threshold: 100,000,000 $CLAWNCH at 18 decimals.
+# ~$1,050 USD at session-time price. Power-user / pro-trader tier —
+# unlocks autopilot features (/sniper, /agent --ai). Meaningful jump
+# from HOLDER, but still accessible to anyone who's serious about
+# trading on the platform.
+UNLIMITED_THRESHOLD = 100_000_000
+UNLIMITED_THRESHOLD_WEI = UNLIMITED_THRESHOLD * (10**18)
+
 # Cache TTL — balance reads hit the RPC, which is slow + rate-limited.
 # A 60-second cache is fine because tier changes are rare (you bought
-# 10k $CLAWNCH; you don't immediately sell 9k of it).
+# 10M $CLAWNCH; you don't immediately sell 9M of it).
 _CACHE_TTL_SECONDS = 60
 
 
 class Tier(Enum):
-    """Resolved tier for a wallet."""
+    """Resolved tier for a wallet. Ordered FREE < HOLDER < UNLIMITED."""
 
-    FREE = "free"
-    HOLDER = "holder"
+    FREE = 0
+    HOLDER = 1
+    UNLIMITED = 2
 
 
 # Per-command free-tier caps. Keys are command names; values are the
@@ -105,7 +126,8 @@ class TokenGateService(Service):
         return {
             "id": self.id,
             "status": "running" if self._running else "stopped",
-            "threshold_clawnch": HOLDER_THRESHOLD,
+            "holder_threshold_clawnch": HOLDER_THRESHOLD,
+            "unlimited_threshold_clawnch": UNLIMITED_THRESHOLD,
             "cached_entries": len(self._cache),
         }
 
@@ -114,7 +136,9 @@ class TokenGateService(Service):
 
         No wallet → FREE with 0 balance. Cache hits return without
         touching RPC. Cache misses (or expired entries) make one
-        ``balanceOf`` eth_call.
+        ``balanceOf`` eth_call. Tier resolution checks UNLIMITED
+        threshold first so a wallet straddling both cutoffs lands in
+        the highest tier.
         """
         if not address:
             return Tier.FREE, 0
@@ -125,7 +149,12 @@ class TokenGateService(Service):
             return cached[0], cached[1]
 
         balance = _read_clawnch_balance(address)
-        tier = Tier.HOLDER if balance >= HOLDER_THRESHOLD_WEI else Tier.FREE
+        if balance >= UNLIMITED_THRESHOLD_WEI:
+            tier = Tier.UNLIMITED
+        elif balance >= HOLDER_THRESHOLD_WEI:
+            tier = Tier.HOLDER
+        else:
+            tier = Tier.FREE
         self._cache[key] = (tier, balance, now + _CACHE_TTL_SECONDS)
         return tier, balance
 
@@ -172,30 +201,46 @@ def _reset_for_tests() -> None:
 # ── high-level helpers used by gated command handlers ──────────────
 
 
+_TIER_THRESHOLD_TOKENS = {
+    Tier.HOLDER: HOLDER_THRESHOLD,
+    Tier.UNLIMITED: UNLIMITED_THRESHOLD,
+}
+
+_TIER_LABELS = {
+    Tier.HOLDER: "Holder",
+    Tier.UNLIMITED: "Clawmes Unlimited",
+}
+
+
 def check_tier_or_error(min_tier: Tier, *, feature: str) -> str | None:
     """Return ``None`` if the active wallet meets ``min_tier``, else an error.
 
     Reads the active wallet via :func:`clawmes.services.wallet.get_wallet_state`.
     If no wallet is connected, treats the user as free tier (so the
     error message tells them what they need to unlock the feature).
+
+    Tier comparison uses ``Tier.value`` so a wallet at a HIGHER tier
+    than required passes automatically — an UNLIMITED holder calling
+    a HOLDER-gated feature never gets blocked.
     """
     if min_tier == Tier.FREE:
         return None  # always allowed
 
     address = _active_wallet_address()
     tier, balance = get_token_gate_service().resolve_tier(address)
-    if tier == Tier.HOLDER:
+    if tier.value >= min_tier.value:
         return None
 
-    # User is free-tier; build a helpful error.
-    shortfall = HOLDER_THRESHOLD - (balance // (10**18))
+    required_tokens = _TIER_THRESHOLD_TOKENS[min_tier]
+    tier_label = _TIER_LABELS[min_tier]
+    held = balance // (10**18)
+    shortfall = required_tokens - held
     lines = [
-        f"{feature} requires holding at least {HOLDER_THRESHOLD:,} $CLAWNCH.",
+        f"{feature} requires {tier_label} tier: hold {required_tokens:,}+ $CLAWNCH.",
     ]
     if not address:
         lines.append("No wallet connected. Run /connect to read your balance.")
     else:
-        held = balance // (10**18)
         lines.append(f"Active wallet holds {held:,} $CLAWNCH (need {shortfall:,} more).")
     lines.extend(
         [
@@ -213,18 +258,18 @@ def free_tier_cap(command: str) -> int | None:
 
 
 def check_cap_or_error(command: str, *, active_count: int, feature: str) -> str | None:
-    """Return ``None`` if the user is under cap or a HOLDER, else error.
+    """Return ``None`` if the user is under cap or HOLDER+, else error.
 
-    Used by ``/dca add`` / ``/copy add`` / ``/alerts add`` to enforce
-    per-command active-item limits at the free tier. Holder tier has
-    no cap.
+    Used by ``/dca add`` / ``/copy add`` / ``/alerts add`` /
+    ``/limit_order add`` to enforce per-command active-item limits at
+    the free tier. HOLDER and UNLIMITED tiers have no cap.
     """
     cap = free_tier_cap(command)
     if cap is None or active_count < cap:
         return None
     address = _active_wallet_address()
     tier, _ = get_token_gate_service().resolve_tier(address)
-    if tier == Tier.HOLDER:
+    if tier.value >= Tier.HOLDER.value:
         return None
     return (
         f"Free tier allows {cap} active {feature}(s). "
