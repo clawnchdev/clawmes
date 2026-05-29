@@ -18,6 +18,7 @@ from clawmes.commands import (
     agent_plan,
     alerts,
     allowlist,
+    auto_tune,
     balance,
     burn,
     buy,
@@ -33,10 +34,13 @@ from clawmes.commands import (
     leaderboard,
     limit_order,
     my_launches,
+    objective,
     onboarding,
     onramp,
     plans,
     policy,
+    report,
+    research,
     sniper,
     strategy,
     trending,
@@ -87,6 +91,10 @@ def register_all(ctx) -> None:
     limit_order.register(ctx)
     sniper.register(ctx)
     strategy.register(ctx)
+    report.register(ctx)
+    objective.register(ctx)
+    auto_tune.register(ctx)
+    research.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel
