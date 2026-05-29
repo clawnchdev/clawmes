@@ -6,6 +6,62 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.14.0 — 2026-05-28
+
+### Added — the agent manages the agent
+
+The Clawmes tier philosophy now reads:
+
+  * FREE       — you do the work with the agent.
+  * HOLDER     — you manage the agent.
+  * UNLIMITED  — the agent manages the agent.
+
+Four new commands operationalize that third line. Each one
+handles a piece of the operator's job — reviewing performance,
+remembering goals, tuning schedules, doing research — instead
+of just executing tasks.
+
+- **`/report now|daily|weekly|objectives`** (UNLIMITED) —
+  autonomous performance report across every automation surface
+  (`/dca`, `/copy`, `/alerts`, `/limit_order`, `/sniper`,
+  `/objective`). Counts active schedules, executions, ETH
+  spent, success rate, fires, and surfaces objectives + their
+  progress. No prompt required.
+
+- **`/objective add <name> <goal> --budget <eth>
+  [--horizon <interval>]`** (UNLIMITED) — high-level goal
+  tracking. Stores a named, free-text goal with a budget cap.
+  Progress is computed forward-only from the registration
+  anchor, summing successful executions across `/dca` + `/copy`.
+  Surfaced in `/report objectives` and `/objective progress
+  <id>`.
+
+- **`/auto-tune review|apply [<id>]|history`** (UNLIMITED) —
+  autonomous schedule review. Walks every automation surface,
+  applies conservative heuristics, and produces recommendations:
+    - DCA with success rate < 50% (5+ executions) → suggest pause
+    - Copy with 0 successful in 7 days but tx activity → suggest pause
+    - Sniper idle 7+ days with budget remaining → suggest review
+    - Limit order active 30+ days → suggest review / cancel
+    - Wallet alert active 30+ days, never fired → suggest review
+  `apply` commits recommended pauses; all mutations are reversible
+  via the underlying command's `resume`.
+
+- **`/research <token> [--no-narrative] [--json]`** (UNLIMITED) —
+  structured token research. Pulls DexScreener pair data,
+  `defi_price` fallback, Clawnch launch metadata, and derived
+  risk flags (`low_liquidity`, `thin_volume_24h`,
+  `major_drawdown_24h`, `blow_off_top_candidate`) into one
+  report. Optional LLM-synthesized 3-4 sentence summary via
+  OpenGateway; graceful fallback when unavailable.
+
+### Internal
+
+- `clawmes/commands/report.py`, `objective.py`, `auto_tune.py`,
+  `research.py` (all new).
+- 4372 tests pass at 100% coverage (was 4143). README counts:
+  90 → 94 commands.
+
 ## 0.13.0 — 2026-05-28
 
 ### Added — more UNLIMITED features
