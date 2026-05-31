@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.15.0 — 2026-05-29
+
+### Added — trader-focused features
+
+Four additions targeted at the things crypto traders actually need
+that nobody else builds well.
+
+- **`/mev-protect on|off|status`** (HOLDER) — global toggle for
+  privacy-RPC swap routing. When enabled, swap transactions route
+  through Flashbots Protect (Ethereum mainnet endpoint registered;
+  Base equivalent slots open for when one exists). Sandwich attacks
+  become impossible on chains with a registered privacy endpoint.
+  Other transactions (transfers, deploys, burns) are unaffected
+  because they don't need protection.
+
+- **`/limit_order --bracket <tp_pct>:<sl_pct>`** (HOLDER) — bracket
+  orders attached to buy orders. On fill, the scheduler auto-
+  materializes a take-profit sell order at +`tp_pct%` and a stop-
+  loss sell order at -`sl_pct%`, both anchored to the actual fill
+  price. Children inherit slippage_bps from the parent. State
+  scheduling pattern remains identical — children are just new
+  orders in the same list with `parent_order_id` + `kind` metadata.
+
+- **`/scan <wallet> [--json]`** (HOLDER) — comprehensive wallet
+  analysis. Pulls native ETH balance, recent ERC-20 transfer
+  activity (capped at 100), aggregated top holdings, and derived
+  risk flags (`no_recent_activity`, `very_low_activity`,
+  `single_token_concentration`, `single_token_dominance`,
+  `empty_wallet`). One-screen output by default; `--json` returns
+  the raw structured snapshot for piping into other tools.
+
+- **`/airdrop scan|list|claim <name>|history`** (UNLIMITED) —
+  autonomous airdrop scanner + claimer. Maintains a conservative
+  registry of known airdrops. `scan` queries every registered
+  checker for the active wallet's eligibility. `claim` submits the
+  claim transaction (only for entries with verified claim
+  contracts; check-only entries return a manual-claim hint).
+  Refuses to fire a claim tx without a recent eligible scan to
+  avoid wasting gas on revert. State persists scans + claims
+  history.
+
+### Internal
+
+- `clawmes/commands/mev_protect.py`, `scan.py`, `airdrop.py` (all
+  new). `limit_order.py` extended with `_materialize_bracket` and
+  bracket flag parsing.
+- 4482 tests pass at 100% coverage (was 4372). README counts:
+  94 → 97 commands.
+
 ## 0.14.0 — 2026-05-28
 
 ### Added — the agent manages the agent

@@ -16,6 +16,7 @@ from __future__ import annotations
 from clawmes.commands import (
     agent,
     agent_plan,
+    airdrop,
     alerts,
     allowlist,
     auto_tune,
@@ -33,6 +34,7 @@ from clawmes.commands import (
     launch,
     leaderboard,
     limit_order,
+    mev_protect,
     my_launches,
     objective,
     onboarding,
@@ -41,6 +43,7 @@ from clawmes.commands import (
     policy,
     report,
     research,
+    scan,
     sniper,
     strategy,
     trending,
@@ -95,6 +98,9 @@ def register_all(ctx) -> None:
     objective.register(ctx)
     auto_tune.register(ctx)
     research.register(ctx)
+    mev_protect.register(ctx)
+    scan.register(ctx)
+    airdrop.register(ctx)
     # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel
