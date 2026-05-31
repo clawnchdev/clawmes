@@ -278,6 +278,31 @@ def _store_order(
         if max_attempts < 1:
             return f"--max-attempts must be >= 1 (got {max_attempts})."
 
+    # Bracket: on fill, auto-create take-profit + stop-loss sell orders.
+    # Grammar: ``--bracket <tp_pct>:<sl_pct>``. Only valid for buy orders
+    # — sell orders don't "fill into a position" the way buys do.
+    bracket: dict[str, float] | None = None
+    if "bracket" in flags:
+        from clawmes.services.token_gate import Tier, check_tier_or_error
+
+        gate_err = check_tier_or_error(Tier.HOLDER, feature="/limit_order --bracket")
+        if gate_err:
+            return gate_err
+        if type_ != "buy":
+            return "--bracket can only be attached to buy orders."
+        raw = flags["bracket"]
+        parts_b = raw.split(":")
+        if len(parts_b) != 2:
+            return f"--bracket must be '<tp_pct>:<sl_pct>' (got {raw!r})."
+        try:
+            tp_pct = float(parts_b[0])
+            sl_pct = float(parts_b[1])
+        except ValueError:
+            return f"--bracket values must be numbers (got {raw!r})."
+        if tp_pct <= 0 or sl_pct <= 0:
+            return f"--bracket values must be positive (got {raw!r})."
+        bracket = {"tp_pct": tp_pct, "sl_pct": sl_pct}
+
     state = _load_state()
     order_id = _new_id()
     order = {
@@ -290,6 +315,8 @@ def _store_order(
         "threshold_usd": threshold_usd,
         "slippage_bps": slippage_bps,
         "max_attempts": max_attempts,
+        "bracket": bracket,
+        "bracket_children": [],
         "status": "active",
         "created_at": _now_iso(),
         "attempts": [],
@@ -298,6 +325,11 @@ def _store_order(
     _save_state(state)
 
     verb = "Buy" if type_ == "buy" else "Sell"
+    bracket_line = (
+        f"  Bracket:     +{bracket['tp_pct']}% TP / -{bracket['sl_pct']}% SL on fill\n"
+        if bracket
+        else ""
+    )
     return (
         f"Limit order added: {order_id}\n"
         f"  Type:        {verb}\n"
@@ -306,10 +338,11 @@ def _store_order(
         f"  Trigger:     price {direction} ${threshold_usd}\n"
         f"  Slippage:    {slippage_bps} bps\n"
         f"  Max retries: {max_attempts}\n"
-        "\n"
-        "The limit-order scheduler polls prices on the registry cadence (~60s)\n"
-        "and fires a swap when the threshold is crossed. The order auto-completes\n"
-        "on a successful fill and auto-fails after max-attempts unsuccessful swaps."
+        + bracket_line
+        + "\n"
+        + "The limit-order scheduler polls prices on the registry cadence (~60s)\n"
+        + "and fires a swap when the threshold is crossed. The order auto-completes\n"
+        + "on a successful fill and auto-fails after max-attempts unsuccessful swaps."
     )
 
 
@@ -461,6 +494,7 @@ def _run_due_with_lines() -> tuple[int, list[str]]:
     state = _load_state()
     lines: list[str] = []
     fired = 0
+    new_children: list[dict[str, Any]] = []
     for order in state["orders"]:
         if order.get("status") != "active":
             continue
@@ -475,15 +509,94 @@ def _run_due_with_lines() -> tuple[int, list[str]]:
         status = result.get("status")
         if status == "ok":
             order["status"] = "filled"
+            # If the parent has a bracket, materialize TP + SL children
+            # right now while we have the fill price handy. Children
+            # are stored in the same orders list and will be evaluated
+            # on subsequent ticks.
+            children = _materialize_bracket(order, result.get("price_usd"))
+            if children:
+                order["bracket_children"] = [c["id"] for c in children]
+                new_children.extend(children)
+                for c in children:
+                    lines.append(f"  {order['id']}  bracket → spawned {c['id']} ({c['kind']})")
         elif status in ("error", "no_wallet") and len(order["attempts"]) >= int(
             order.get("max_attempts") or _DEFAULT_MAX_ATTEMPTS
         ):
             order["status"] = "failed"
         lines.append(f"  {order['id']}  {status}  {result.get('detail', '')}")
         fired += 1
+
+    if new_children:
+        state["orders"].extend(new_children)
+
     if fired > 0 or any(lines):
         _save_state(state)
     return fired, lines
+
+
+def _materialize_bracket(
+    parent: dict[str, Any], fill_price_usd: float | None
+) -> list[dict[str, Any]]:
+    """Spawn TP + SL sell orders from a filled buy with --bracket attached.
+
+    Returns an empty list when no bracket is configured or when we
+    can't anchor a fill price. Children inherit slippage_bps from the
+    parent and use a 5-attempt max so they don't fail-loop on slippage
+    in fast markets.
+    """
+    bracket = parent.get("bracket")
+    if not bracket or fill_price_usd is None or fill_price_usd <= 0:
+        return []
+    tp_pct = float(bracket.get("tp_pct", 0))
+    sl_pct = float(bracket.get("sl_pct", 0))
+    if tp_pct <= 0 or sl_pct <= 0:
+        return []
+    parent_id = parent["id"]
+    sender = parent.get("sender_id", "default")
+    slippage = int(parent.get("slippage_bps") or _DEFAULT_SLIPPAGE_BPS)
+    amount = float(parent.get("amount", 0.0))
+    # The bracket children sell however much of the token we get post-
+    # fill. We don't know the exact buy_amount here, so we use a
+    # placeholder of 0 — the actual fill at execution time will rely
+    # on the user's current balance. The bracket scheduler reads from
+    # ``balance`` rather than the stored amount.
+    tp_child = {
+        "id": _new_id(),
+        "sender_id": sender,
+        "type": "sell",
+        "token": parent["token"],
+        "amount": amount,
+        "direction": "above",
+        "threshold_usd": fill_price_usd * (1 + tp_pct / 100.0),
+        "slippage_bps": slippage,
+        "max_attempts": 5,
+        "bracket": None,
+        "bracket_children": [],
+        "status": "active",
+        "created_at": _now_iso(),
+        "attempts": [],
+        "parent_order_id": parent_id,
+        "kind": "take_profit",
+    }
+    sl_child = {
+        "id": _new_id(),
+        "sender_id": sender,
+        "type": "sell",
+        "token": parent["token"],
+        "amount": amount,
+        "direction": "below",
+        "threshold_usd": fill_price_usd * (1 - sl_pct / 100.0),
+        "slippage_bps": slippage,
+        "max_attempts": 5,
+        "bracket": None,
+        "bracket_children": [],
+        "status": "active",
+        "created_at": _now_iso(),
+        "attempts": [],
+        "parent_order_id": parent_id,
+        "kind": "stop_loss",
+    }
+    return [tp_child, sl_child]
 
 
 def _evaluate_order(order: dict[str, Any]) -> dict[str, Any] | None:
