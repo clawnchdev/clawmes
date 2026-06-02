@@ -36,20 +36,33 @@ def text_result(text: str, *, details: Any = None) -> str:
     return json.dumps(payload)
 
 
-def json_result(data: dict[str, Any], *, summary: str | None = None) -> str:
+def json_result(
+    data: dict[str, Any],
+    *,
+    summary: str | None = None,
+    preview: str | None = None,
+) -> str:
     """Return a successful tool result whose details are a structured dict.
 
     The human-readable ``content`` is either ``summary`` (preferred) or a
     pretty-printed JSON dump of ``data``.
+
+    ``preview`` is surfaced as an envelope **top-level** key (sibling of
+    ``content`` / ``details``). The Hermes Desktop chat tool-card reads the
+    tool result's top level — ``result.preview`` — to render an in-app preview
+    attachment (``apps/desktop`` ``tool-fallback-model.ts`` ``toolPreviewTarget``).
+    A path/URL placed inside ``details`` is one level too deep for that
+    extractor, so an HTML card only opens in the desktop's preview pane when
+    its path is passed here. Omitted from the envelope when falsy.
     """
     text = summary if summary is not None else json.dumps(data, indent=2, default=str)
-    return json.dumps(
-        {
-            "content": [{"type": "text", "text": text}],
-            "details": data,
-        },
-        default=str,
-    )
+    envelope: dict[str, Any] = {
+        "content": [{"type": "text", "text": text}],
+        "details": data,
+    }
+    if preview:
+        envelope["preview"] = preview
+    return json.dumps(envelope, default=str)
 
 
 def error_result(message: str, *, code: str | None = None) -> str:

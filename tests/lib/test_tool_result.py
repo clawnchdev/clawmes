@@ -51,6 +51,21 @@ class TestJsonResult:
         out = json.loads(out_text)
         assert "2026-01-01" in out["content"][0]["text"]
 
+    def test_preview_at_envelope_top_level(self):
+        # The desktop chat tool-card reads result.preview (envelope top level),
+        # NOT details.preview — so it must land beside content/details.
+        out = json.loads(json_result({"a": 1}, preview="/tmp/card.html"))
+        assert out["preview"] == "/tmp/card.html"
+        assert "preview" not in out["details"]
+
+    def test_preview_omitted_when_none(self):
+        out = json.loads(json_result({"a": 1}))
+        assert "preview" not in out
+
+    def test_preview_omitted_when_empty(self):
+        out = json.loads(json_result({"a": 1}, preview=""))
+        assert "preview" not in out
+
 
 class TestErrorResult:
     def test_isError_true(self):
