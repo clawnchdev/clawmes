@@ -179,6 +179,35 @@ class TestConnectCard:
         out = ui_cards.connect_card(uri="wc:<script>@2")
         assert "wc:<script>@2" not in out
 
+    def test_includes_scannable_qr(self):
+        out = ui_cards.connect_card(uri="wc:abc123@2?relay=x")
+        assert "<svg" in out  # real QR rendered inline
+        assert "Scan with your wallet" in out
+
+    def test_falls_back_to_uri_when_qr_fails(self, monkeypatch):
+        import qrcode
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("encode failed")
+
+        monkeypatch.setattr(qrcode, "make", _boom)
+        out = ui_cards.connect_card(uri="wc:abc123@2?relay=x")
+        # URI still shown; QR block omitted.
+        assert "wc:abc123@2?relay=x" in out
+        assert "Scan with your wallet" not in out
+
+
+class TestQrSvg:
+    def test_returns_svg(self):
+        svg = ui_cards._qr_svg("wc:abc@2")
+        assert "<svg" in svg
+
+    def test_returns_empty_on_failure(self, monkeypatch):
+        import qrcode
+
+        monkeypatch.setattr(qrcode, "make", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+        assert ui_cards._qr_svg("wc:abc@2") == ""
+
 
 class TestWriteCard:
     def test_writes_file_and_returns_path(self, tmp_path, monkeypatch):

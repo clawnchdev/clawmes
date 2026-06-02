@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.16.3 — 2026-06-02
+
+### Added — scannable QR on the connect card
+
+- `connect_card` now embeds a real scannable **QR** of the WalletConnect
+  URI (black on a white tile so wallet scanners read it against the dark
+  card), alongside the existing copyable URI fallback. Rendered as inline
+  SVG — best-effort, falling back to URI-only if encoding fails.
+
+### Dependency
+
+- Added **`qrcode>=8.0`** (BSD, Lincoln Loop). Pinned **without** the
+  `[pil]` extra and used via the `SvgPathImage` factory, so it pulls in
+  **no Pillow / no C extensions** — pure-Python, zero transitive deps on
+  macOS/Linux (`colorama` is Windows-only). Verified against OSV (no
+  known advisories).
+
 ## 0.16.2 — 2026-06-02
 
 ### Added — Hermes Desktop UI: complete tx-tool link coverage
