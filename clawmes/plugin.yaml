@@ -1,5 +1,5 @@
 name: clawmes
-version: 0.16.4
+version: 0.17.0
 description: Hermes Agent for crypto. Wallet, swaps, DeFi, launches, automation.
 author: Clawnch
 kind: standalone
@@ -46,6 +46,7 @@ provides_tools:
   - market_intel
   - cost_basis
   - block_explorer
+  - clawmes_info
   - molten
   - clawnx
   - hummingbot

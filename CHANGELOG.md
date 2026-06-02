@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.17.0 — 2026-06-02
+
+### Added — `clawmes_info`: agent-callable bridge for the read-only command surface
+
+The Hermes Desktop app curates its slash-command autocomplete to a built-in
+allowlist (`apps/desktop` → `desktop-slash-commands.ts`), so clawmes's plugin
+slash commands don't appear in the `/` menu and their output renders as a
+status line instead of a selectable chat bubble. Verified against the desktop
+source.
+
+To make clawmes usable from natural language in the desktop (and render as a
+proper tool card), this adds a single read-only **tool** that bridges the key
+informational commands:
+
+- **`clawmes_info`** (tool 53, toolset `clawmes-trading`) — `op` + optional
+  `args`. Ops: `wallet`, `balance`, `portfolio`, `research`, `scan`,
+  `trending`, `leaderboard`, `my_launches`. The agent invokes it from phrases
+  like "what's my wallet balance" or "research CLAWNCH"; the result renders as
+  a normal tool card, and any HTML card the underlying command generates
+  (e.g. `/research`) is surfaced as a preview attachment via
+  `json_result(preview=...)`.
+- Includes an async-safe runner so the sync tool can drive the `async` command
+  handlers whether or not an event loop is already running.
+
+Read-only by design — write actions keep their own gated tools (`defi_swap`,
+`transfer`, …). Tool count: 52 → 53.
+
 ## 0.16.4 — 2026-06-02
 
 ### Fixed — preview cards now actually reach the desktop
