@@ -1,6 +1,6 @@
 [project]
 name = "clawmes"
-version = "0.16.2"
+version = "0.16.3"
 description = "Hermes Agent plugin for crypto: wallets, DEX trading, lending and staking, governance, on-chain automation."
 readme = "README.md"
 license = { text = "MIT" }
@@ -50,6 +50,10 @@ dependencies = [
     "pyyaml>=6.0",
     "rich>=13.7",
     "typing_extensions>=4.12",
+    # QR rendering for the Hermes Desktop connect card. Pinned WITHOUT the
+    # [pil] extra so only pure-Python qrcode is pulled in (no Pillow / C
+    # extensions); we use the SvgPathImage factory. BSD-licensed.
+    "qrcode>=8.0",
 ]
 
 [project.optional-dependencies]
