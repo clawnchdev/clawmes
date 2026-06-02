@@ -191,16 +191,21 @@ def _handle_stake(state, protocol: str, chain_id: int, args) -> str:
     except Exception as exc:  # noqa: BLE001
         return error_result(f"Stake failed: {exc}", code="send_failed")
 
+    result = {
+        "tx_hash": tx_hash,
+        "protocol": protocol,
+        "name": protocol_name(protocol),
+        "chain_id": chain_id,
+        "amount_eth": amount_raw,
+        "amount_wei": str(value_wei),
+        "contract": contract,
+    }
+    # Desktop UI: clickable explorer link for the stake tx.
+    from clawmes.lib.ui_artifacts import enrich_tx_links
+
+    enrich_tx_links(result, tx_hash=tx_hash, chain_id=chain_id)
     return json_result(
-        {
-            "tx_hash": tx_hash,
-            "protocol": protocol,
-            "name": protocol_name(protocol),
-            "chain_id": chain_id,
-            "amount_eth": amount_raw,
-            "amount_wei": str(value_wei),
-            "contract": contract,
-        },
+        result,
         summary=(
             f"Staked {amount_raw} ETH via {protocol_name(protocol)}: {tx_hash}\n"
             f"  Receipt token will mint in the same block."

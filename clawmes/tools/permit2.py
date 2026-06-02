@@ -199,15 +199,17 @@ def _handle_revoke(args, state, chain_id: int) -> str:
     except Exception as exc:  # noqa: BLE001
         return error_result(f"Revoke failed: {exc}", code="send_failed")
 
-    return json_result(
-        {
-            "tx_hash": tx_hash,
-            "token": token,
-            "spender": spender,
-            "permit2_address": PERMIT2_ADDRESS,
-        },
-        summary=f"Permit2 revoke: {tx_hash}",
-    )
+    result = {
+        "tx_hash": tx_hash,
+        "token": token,
+        "spender": spender,
+        "permit2_address": PERMIT2_ADDRESS,
+    }
+    # Desktop UI: clickable explorer link for the revoke tx.
+    from clawmes.lib.ui_artifacts import enrich_tx_links
+
+    enrich_tx_links(result, tx_hash=tx_hash, chain_id=chain_id)
+    return json_result(result, summary=f"Permit2 revoke: {tx_hash}")
 
 
 def _handle_list(args, state, chain_id: int) -> str:

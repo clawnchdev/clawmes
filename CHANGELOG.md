@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.16.1 — 2026-06-02
+
+### Added — Hermes Desktop UI follow-ups
+
+Continues the v0.16.0 desktop integration across more surfaces.
+
+- **Link enrichment** extended to `defi_lend` (Aave supply/withdraw/
+  borrow/repay), `defi_stake` (Lido/Rocket Pool), and `permit2` (revoke):
+  each now surfaces a clickable explorer link for the tx — and, for
+  `defi_lend`, DexScreener/Clanker/token-explorer links for the asset.
+  Passive descriptive keys (no preview auto-open), so they're safe on
+  any call path.
+
+- **`/research <token>`** now writes a research card
+  (`research_card`) — price, liquidity, volume, market cap, 24h change,
+  risk flags, plus DexScreener/Clanker/explorer links — and surfaces its
+  path as a clickable artifact beneath the text report. Best-effort: a
+  card failure never affects the report.
+
 ## 0.16.0 — 2026-06-02
 
 ### Added — Hermes Desktop UI integration

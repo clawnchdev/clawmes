@@ -260,16 +260,23 @@ def _send(*, state, pool, calldata, chain_id, action, asset, amount_base) -> str
     except Exception as exc:  # noqa: BLE001
         return error_result(f"{action} failed: {exc}", code="send_failed")
 
+    result = {
+        "tx_hash": tx_hash,
+        "chain_id": chain_id,
+        "pool": pool,
+        "action": action,
+        "asset": asset,
+        "amount": str(amount_base),
+        "is_full_balance": amount_base == UNLIMITED_ALLOWANCE,
+    }
+    # Desktop UI: clickable explorer link for the tx (+ market links for the
+    # asset). Passive descriptive keys — never auto-opens the preview pane.
+    from clawmes.lib.ui_artifacts import enrich_token_links, enrich_tx_links
+
+    enrich_tx_links(result, tx_hash=tx_hash, chain_id=chain_id)
+    enrich_token_links(result, token=asset, chain_id=chain_id)
     return json_result(
-        {
-            "tx_hash": tx_hash,
-            "chain_id": chain_id,
-            "pool": pool,
-            "action": action,
-            "asset": asset,
-            "amount": str(amount_base),
-            "is_full_balance": amount_base == UNLIMITED_ALLOWANCE,
-        },
+        result,
         summary=(f"Aave {action}: {tx_hash}\n  asset={asset}\n  amount={amount_base}"),
     )
 

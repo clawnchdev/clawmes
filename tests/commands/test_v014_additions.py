@@ -1197,6 +1197,36 @@ class TestResearchHelpers:
     def test_fmt_pct_string(self):
         assert research._fmt_pct("text") == "text"
 
+
+class TestResearchCard:
+    """Desktop UI: /research writes a research card surfaced as an artifact."""
+
+    def test_card_suffix_rich(self):
+        # Partial dex (price + liquidity present, others absent) exercises both
+        # the value-present and value-absent branches of the row loop.
+        report = {
+            "dex": {"symbol": "MNEME", "price_usd": 0.0001, "liquidity_usd": 5000.0},
+            "flags": ["low_liquidity"],
+            "resolved_address": "0x" + "a" * 40,
+        }
+        out = research._card_suffix(report, "MNEME")
+        assert "Research card:" in out
+        assert ".html" in out
+
+    def test_card_suffix_empty_report(self):
+        # No dex data, no flags → nothing to render → empty suffix.
+        assert research._card_suffix({}, "FOO") == ""
+
+    def test_card_suffix_swallows_errors(self, monkeypatch):
+        import clawmes.lib.ui_cards as ui_cards
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("render failed")
+
+        monkeypatch.setattr(ui_cards, "write_card", _boom)
+        report = {"dex": {"symbol": "X", "price_usd": 1.0}, "flags": []}
+        assert research._card_suffix(report, "X") == ""
+
     def test_fmt_usd_none(self):
         assert research._fmt_usd(None) == "?"
 

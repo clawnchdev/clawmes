@@ -75,12 +75,61 @@ async def handle_research(raw_args: str, *, sender_id: str = "default", **_kwarg
         out = json.dumps(report, indent=2)
     elif use_narrative:
         narrative = _llm_synthesize(report)
-        out = _render_report(report) + ("\n\n" + narrative if narrative else "")
+        out = (
+            _render_report(report)
+            + ("\n\n" + narrative if narrative else "")
+            + _card_suffix(report, token)
+        )
     else:
-        out = _render_report(report)
+        out = _render_report(report) + _card_suffix(report, token)
 
     _record("research", raw_args, out)
     return out
+
+
+def _card_suffix(report: dict[str, Any], token: str) -> str:
+    """Build a Desktop research card and return a line pointing at it.
+
+    Returns ``""`` when there's nothing to show or anything fails — the card
+    is a best-effort UI nicety layered on top of the text report. The card
+    path surfaces as a clickable File artifact in the Hermes Desktop app.
+    """
+    try:
+        from clawmes.lib.ui_artifacts import clanker_url, dexscreener_url, explorer_token_url
+        from clawmes.lib.ui_cards import research_card, write_card
+
+        dex = report.get("dex") or {}
+        symbol = dex.get("symbol") or token
+        specs = [
+            ("Price", "price_usd"),
+            ("Liquidity", "liquidity_usd"),
+            ("Volume 24h", "volume_24h"),
+            ("Market cap", "market_cap"),
+            ("Change 24h", "price_change_24h"),
+        ]
+        rows: list[tuple[str, str]] = []
+        for label, key in specs:
+            value = dex.get(key)
+            if value is not None:
+                rows.append((label, str(value)))
+        flags = report.get("flags") or []
+        if flags:
+            rows.append(("Risk flags", ", ".join(str(f) for f in flags)))
+
+        addr = report.get("resolved_address") or ""
+        links = [
+            ("DexScreener", dexscreener_url(addr, 8453) or ""),
+            ("Clanker", clanker_url(addr, 8453) or ""),
+            ("Explorer", explorer_token_url(addr, 8453) or ""),
+        ]
+        if not rows:
+            return ""
+        card_path = write_card(
+            research_card(symbol=symbol, rows=rows, links=links), f"research-{symbol}"
+        )
+        return f"\n\nResearch card: {card_path}\n"
+    except Exception:  # noqa: BLE001 — UI is best-effort
+        return ""
 
 
 # ── data sources ───────────────────────────────────────────────────
