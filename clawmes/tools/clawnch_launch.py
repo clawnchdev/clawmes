@@ -197,6 +197,38 @@ def _handle_deploy(args: dict[str, Any]) -> str:
 
     tx_hash = result.get("txHash") or result.get("tx_hash")
     token_address = result.get("tokenAddress") or result.get("token_address")
+    # Desktop UI: Clawnch launches are Base-only, so surface the tx explorer
+    # link plus Clanker / DexScreener / token-explorer links for the brand-new
+    # token as clickable Link artifacts. The enrich helpers no-op on missing or
+    # malformed values, so we call them unconditionally (passive descriptive
+    # keys — no preview auto-open from the tool itself).
+    from clawmes.lib.ui_artifacts import enrich_token_links, enrich_tx_links
+
+    enrich_tx_links(result, tx_hash=tx_hash or "", chain_id=8453)
+    enrich_token_links(result, token=token_address or "", chain_id=8453)
+
+    # Desktop UI: render a launch-receipt card and auto-open it in the side
+    # rail. clawnch_launch is user/LLM-invoked (never scheduler-driven), so a
+    # card-per-call is fine. Best-effort: never fail the launch on UI errors.
+    try:
+        from clawmes.lib.ui_artifacts import attach_preview
+        from clawmes.lib.ui_cards import receipt_card, write_card
+
+        rows = [("Symbol", symbol)]
+        if token_address:
+            rows.append(("Token", token_address))
+        if tx_hash:
+            rows.append(("Tx", tx_hash))
+        links = [
+            ("Clanker", result.get("clanker_url", "")),
+            ("DexScreener", result.get("dexscreener_url", "")),
+            ("Explorer", result.get("explorer_url", "")),
+        ]
+        card_html = receipt_card(title=f"Launched {symbol}", rows=rows, links=links)
+        attach_preview(result, str(write_card(card_html, f"launch-{symbol}")))
+    except Exception:  # noqa: BLE001 — UI is best-effort
+        pass
+
     summary_parts = [f"Launched {symbol} via Clawnch."]
     if token_address:
         summary_parts.append(f"Token: {token_address}")

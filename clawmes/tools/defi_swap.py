@@ -342,17 +342,28 @@ def _handle_swap(
     except Exception as exc:  # noqa: BLE001 — surface signing/broadcast errors
         return error_result(f"Swap broadcast failed: {exc}", code="send_failed")
 
+    result = {
+        "tx_hash": tx_hash,
+        "chain_id": chain_id,
+        "sell_token": sell_token,
+        "buy_token": buy_token,
+        "sell_amount": str(quote.get("sellAmount", "")),
+        "buy_amount": str(quote.get("buyAmount", "")),
+        "min_buy_amount": str(quote.get("minBuyAmount", "")),
+        "router": to,
+    }
+    # Desktop UI: surface a clickable explorer link for the tx and market
+    # links for the bought token. These are passive Link artifacts (descriptive
+    # keys, not preview-trigger keys) so they never auto-open the side rail —
+    # safe to emit even from scheduler-driven swaps.
+    from clawmes.lib.ui_artifacts import enrich_token_links, enrich_tx_links
+
+    enrich_tx_links(result, tx_hash=tx_hash, chain_id=chain_id)
+    if buy_token and buy_token.lower() != _NATIVE_ADDRESS:
+        enrich_token_links(result, token=buy_token, chain_id=chain_id)
+
     return json_result(
-        {
-            "tx_hash": tx_hash,
-            "chain_id": chain_id,
-            "sell_token": sell_token,
-            "buy_token": buy_token,
-            "sell_amount": str(quote.get("sellAmount", "")),
-            "buy_amount": str(quote.get("buyAmount", "")),
-            "min_buy_amount": str(quote.get("minBuyAmount", "")),
-            "router": to,
-        },
+        result,
         summary=(
             f"Swap submitted: {tx_hash}\n"
             f"  {quote.get('sellAmount', '?')} {sell_token} → "

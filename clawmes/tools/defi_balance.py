@@ -229,15 +229,30 @@ def _handle_summary(address: str, chain) -> str:
     if len(rows) == 1 and rows[0][1] == 0:
         lines.append("  (no balances)")
 
-    return json_result(
-        {
-            "address": address,
-            "chain_id": chain.chain_id,
-            "chain": chain.short_name,
-            "balances": payload,
-        },
-        summary="\n".join(lines),
-    )
+    result: dict[str, Any] = {
+        "address": address,
+        "chain_id": chain.chain_id,
+        "chain": chain.short_name,
+        "balances": payload,
+    }
+    # Desktop UI: render a portfolio card and auto-open it in the side rail via
+    # the ``preview`` key. defi_balance is never on a scheduler path, so this
+    # only fires on user/LLM-invoked balance summaries. UI enrichment must
+    # never break the underlying read, so failures are swallowed.
+    try:
+        from clawmes.lib.ui_artifacts import attach_preview
+        from clawmes.lib.ui_cards import portfolio_card, write_card
+
+        holdings = [{"symbol": p["symbol"], "amount": p["human"]} for p in payload]
+        card_html = portfolio_card(
+            address=address, chain=chain.name, total_usd=None, holdings=holdings
+        )
+        card_path = write_card(card_html, f"portfolio-{chain.short_name}")
+        attach_preview(result, str(card_path))
+    except Exception:  # noqa: BLE001 — UI is best-effort, never fail the read
+        pass
+
+    return json_result(result, summary="\n".join(lines))
 
 
 def register(ctx) -> None:

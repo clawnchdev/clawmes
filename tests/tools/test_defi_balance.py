@@ -132,6 +132,32 @@ class TestSummaryAction:
         text = out["content"][0]["text"]
         assert "no balances" in text.lower()
 
+    def test_summary_attaches_portfolio_preview(self, fake_rpc):
+        # Desktop UI: a portfolio card is written and surfaced under the
+        # ``preview`` key so the desktop auto-opens it in the side rail.
+        import os
+
+        fake_rpc.balance_responses[(HOLDER.lower(), 8453)] = 10**18
+        out = json.loads(defi_balance({"action": "summary", "address": HOLDER, "chain": "base"}))
+        preview = out["details"]["preview"]
+        assert preview.endswith(".html")
+        assert "portfolio" in preview
+        assert os.path.exists(preview)
+
+    def test_summary_card_failure_is_swallowed(self, fake_rpc, monkeypatch):
+        # If card rendering blows up, the balance read must still succeed and
+        # simply omit the preview (UI is best-effort).
+        import clawmes.lib.ui_cards as ui_cards
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(ui_cards, "write_card", _boom)
+        fake_rpc.balance_responses[(HOLDER.lower(), 8453)] = 10**18
+        out = json.loads(defi_balance({"action": "summary", "address": HOLDER, "chain": "base"}))
+        assert "preview" not in out["details"]
+        assert any(b["symbol"] == "ETH" for b in out["details"]["balances"])
+
     def test_native_rpc_error(self, fake_rpc):
         fake_rpc.failure_targets.add(HOLDER.lower())
         out = json.loads(defi_balance({"action": "summary", "address": HOLDER, "chain": "base"}))

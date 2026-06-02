@@ -57,6 +57,18 @@ def mock_ctx() -> FakePluginContext:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_hermes_home(monkeypatch, tmp_path):
+    """Point ``HERMES_HOME`` at a per-test temp dir.
+
+    Anything that writes under ``clawmes.lib.paths.state_dir`` (UI cards,
+    schedules, ledgers, …) must never touch the developer's real ``~/.hermes``
+    during a test run. Tests that need a specific home still override this with
+    their own ``monkeypatch.setenv`` afterwards (their call wins).
+    """
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+
+@pytest.fixture(autouse=True)
 def _default_holder_tier(monkeypatch):
     """Default every test to HOLDER tier with no caps.
 

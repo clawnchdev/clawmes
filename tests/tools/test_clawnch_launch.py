@@ -67,6 +67,24 @@ class TestDeploy:
         # source defaulted by service, not by tool
         assert fake_svc.deploys[0]["params"] == {"name": "Foo", "symbol": "FOO"}
 
+    def test_deploy_attaches_receipt_preview(self, fake_svc):
+        # Desktop UI: a launch-receipt card is written + surfaced for auto-open.
+        out = json.loads(clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO"}))
+        assert out["details"]["preview"].endswith(".html")
+        assert "launch-foo" in out["details"]["preview"].lower()
+
+    def test_deploy_card_failure_is_swallowed(self, fake_svc, monkeypatch):
+        # A UI rendering failure must never break the actual launch.
+        import clawmes.lib.ui_cards as ui_cards
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("render failed")
+
+        monkeypatch.setattr(ui_cards, "write_card", _boom)
+        out = json.loads(clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO"}))
+        assert out["details"]["txHash"] == "0xtx"
+        assert "preview" not in out["details"]
+
     def test_with_description_image(self, fake_svc):
         clawnch_launch(
             {
