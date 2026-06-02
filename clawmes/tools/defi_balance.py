@@ -235,24 +235,24 @@ def _handle_summary(address: str, chain) -> str:
         "chain": chain.short_name,
         "balances": payload,
     }
-    # Desktop UI: render a portfolio card and auto-open it in the side rail via
-    # the ``preview`` key. defi_balance is never on a scheduler path, so this
-    # only fires on user/LLM-invoked balance summaries. UI enrichment must
-    # never break the underlying read, so failures are swallowed.
+    # Desktop UI: render a portfolio card and surface its path at the envelope
+    # top level (via json_result's ``preview=``) so the desktop chat tool-card
+    # opens it in the preview pane. defi_balance is never on a scheduler path,
+    # so this only fires on user/LLM-invoked balance summaries. UI enrichment
+    # must never break the underlying read, so failures are swallowed.
+    preview_path: str | None = None
     try:
-        from clawmes.lib.ui_artifacts import attach_preview
         from clawmes.lib.ui_cards import portfolio_card, write_card
 
         holdings = [{"symbol": p["symbol"], "amount": p["human"]} for p in payload]
         card_html = portfolio_card(
             address=address, chain=chain.name, total_usd=None, holdings=holdings
         )
-        card_path = write_card(card_html, f"portfolio-{chain.short_name}")
-        attach_preview(result, str(card_path))
+        preview_path = str(write_card(card_html, f"portfolio-{chain.short_name}"))
     except Exception:  # noqa: BLE001 — UI is best-effort, never fail the read
-        pass
+        preview_path = None
 
-    return json_result(result, summary="\n".join(lines))
+    return json_result(result, summary="\n".join(lines), preview=preview_path)
 
 
 def register(ctx) -> None:

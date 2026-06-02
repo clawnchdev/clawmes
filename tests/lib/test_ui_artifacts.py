@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from clawmes.lib.ui_artifacts import (
-    PREVIEW_TRIGGER_KEYS,
-    attach_preview,
     clanker_url,
     dexscreener_url,
     enrich_token_links,
@@ -12,7 +10,6 @@ from clawmes.lib.ui_artifacts import (
     explorer_address_url,
     explorer_token_url,
     explorer_tx_url,
-    will_auto_open,
 )
 
 _TX = "0x" + "a" * 64
@@ -126,12 +123,6 @@ class TestEnrichTxLinks:
         enrich_tx_links(details, tx_hash=_BAD, chain_id=8453)
         assert "explorer_url" not in details
 
-    def test_explorer_url_does_not_auto_open(self):
-        # explorer_url is NOT a preview-trigger key, so it must not auto-open.
-        details: dict = {}
-        enrich_tx_links(details, tx_hash=_TX, chain_id=8453)
-        assert will_auto_open(details) is False
-
 
 class TestEnrichTokenLinks:
     def test_adds_all_base_links(self):
@@ -169,64 +160,3 @@ class TestEnrichTokenLinks:
     def test_returns_same_dict(self):
         details: dict = {}
         assert enrich_token_links(details, token=_ADDR, chain_id=8453) is details
-
-    def test_token_links_do_not_auto_open(self):
-        details: dict = {}
-        enrich_token_links(details, token=_ADDR, chain_id=8453)
-        assert will_auto_open(details) is False
-
-
-class TestAttachPreview:
-    def test_sets_preview(self):
-        details: dict = {}
-        attach_preview(details, "/tmp/card.html")
-        assert details["preview"] == "/tmp/card.html"
-
-    def test_empty_path_noop(self):
-        details: dict = {}
-        attach_preview(details, "")
-        assert "preview" not in details
-
-    def test_coerces_to_str(self, tmp_path):
-        details: dict = {}
-        card = tmp_path / "card.html"
-        attach_preview(details, card)  # type: ignore[arg-type]
-        assert details["preview"] == str(card)
-
-    def test_returns_same_dict(self):
-        details: dict = {}
-        assert attach_preview(details, "/x.html") is details
-
-    def test_preview_triggers_auto_open(self):
-        details: dict = {}
-        attach_preview(details, "/tmp/card.html")
-        assert will_auto_open(details) is True
-
-
-class TestWillAutoOpen:
-    def test_url_key_triggers(self):
-        assert will_auto_open({"url": "https://example.com"}) is True
-
-    def test_http_target(self):
-        assert will_auto_open({"target": "http://x.io"}) is True
-
-    def test_file_uri(self):
-        assert will_auto_open({"path": "file:///tmp/x"}) is True
-
-    def test_relative_path(self):
-        assert will_auto_open({"file": "./out.html"}) is True
-
-    def test_home_path(self):
-        assert will_auto_open({"filepath": "~/out.html"}) is True
-
-    def test_non_target_value(self):
-        assert will_auto_open({"url": "just a string"}) is False
-
-    def test_non_string_value(self):
-        assert will_auto_open({"url": 123}) is False
-
-    def test_empty(self):
-        assert will_auto_open({}) is False
-
-    def test_trigger_keys_constant(self):
-        assert PREVIEW_TRIGGER_KEYS == ("url", "target", "path", "file", "filepath", "preview")

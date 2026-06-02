@@ -1,33 +1,28 @@
-"""UI artifact enrichment for the Hermes Desktop app.
+"""Link enrichment for the Hermes Desktop app.
 
 The Hermes Desktop renderer (``apps/desktop`` in NousResearch/hermes-agent)
-surfaces tool output through three generic systems, all driven by the *shape*
-of a tool's ``details`` dict — there is no plugin-UI API, so a Python plugin
-injects UI purely by emitting the right keys:
+has no plugin-UI API, so a Python plugin influences the UI purely through the
+*shape* of a tool's result. Verified against the desktop source, two layers
+read clawmes output differently — and the distinction is load-bearing:
 
-1. **Artifacts view** scrapes every string value in the result; any value that
-   looks like an ``http(s)://`` URL or a file path is collected into the
-   Images / Files / Links tabs. So *any* link we put in ``details`` becomes a
-   clickable artifact regardless of its key name.
+* The **Artifacts view** (``artifacts/index.tsx``) deep-recurses the entire
+  parsed result JSON, so any ``http(s)://`` value — even nested inside
+  ``details`` — is collected as a clickable **Link artifact**. This is the
+  layer this module targets: explorer / DexScreener / Clanker links live under
+  descriptive keys in ``details`` and surface here.
 
-2. **Structured tool-card summary** renders ``details`` keys as bullet lines,
-   prioritising ``title / name / path / url / status / …``.
+* The **chat tool-card** structured extractors (``tool-fallback-model.ts``
+  ``toolPreviewTarget`` / ``toolImageUrl``) read only the **top level** of the
+  result envelope (``result.preview`` / ``result.url`` / ``result.image_url``),
+  NOT ``details``. So a preview/card path must be emitted at the envelope top
+  level — see :func:`clawmes.lib.tool_result.json_result`'s ``preview=`` arg —
+  *not* placed in ``details``. (An earlier ``attach_preview`` helper put it in
+  ``details``; tracing the desktop source proved that's one level too deep, so
+  it was removed.)
 
-3. **Auto-opening side preview pane** inspects, in order, the keys
-   ``url, target, path, file, filepath, preview`` and *auto-opens the first one
-   that looks like a URL or path* in the right-rail webview.
-
-This module centralises the link construction + the precise key discipline:
-
-* Explorer / DexScreener / Clanker links go under **descriptive keys**
-  (``explorer_url``, ``dexscreener_url``, ``clanker_url``) so they become
-  passive clickable Link artifacts **without** hijacking the preview pane on
-  every call.
-* A generated HTML card is attached under the **``preview``** key (via
-  :func:`attach_preview`) so — and only so — the desktop auto-opens it.
-
-Everything here is pure (no I/O, no network) so it is cheap to unit-test and
-safe to call from inside any tool handler.
+This module therefore only constructs the descriptive ``details`` links
+(``explorer_url`` / ``dexscreener_url`` / ``clanker_url``). Everything here is
+pure (no I/O, no network), cheap to unit-test, and safe to call from any tool.
 """
 
 from __future__ import annotations
@@ -54,11 +49,6 @@ _DEXSCREENER_SLUGS: dict[int, str] = {
 _CLANKER_CHAIN_ID = 8453
 _CLANKER_BASE_URL = "https://clanker.world/clanker"
 _DEXSCREENER_BASE_URL = "https://dexscreener.com"
-
-# Keys the desktop's preview router inspects, in priority order, to decide what
-# to auto-open in the side rail. Exposed for tests + callers that need to reason
-# about whether a details dict will trigger an auto-open.
-PREVIEW_TRIGGER_KEYS: tuple[str, ...] = ("url", "target", "path", "file", "filepath", "preview")
 
 
 def _is_tx_hash(value: str) -> bool:
@@ -164,38 +154,3 @@ def enrich_token_links(
             details["clanker_url"] = clank
 
     return details
-
-
-def attach_preview(details: dict[str, Any], path: str) -> dict[str, Any]:
-    """Set ``details['preview']`` so the desktop auto-opens ``path`` in the rail.
-
-    Use this ONLY for genuinely panel-worthy output (a generated HTML card,
-    a report). ``path`` should be an absolute filesystem path or an
-    ``http(s)://`` URL — anything the desktop's ``normalizePreviewTarget`` can
-    resolve. Returns ``details`` for chaining.
-    """
-    if path:
-        details["preview"] = str(path)
-    return details
-
-
-def will_auto_open(details: dict[str, Any]) -> bool:
-    """True if ``details`` would trigger the desktop to auto-open a preview.
-
-    Mirrors the desktop's ``structuredPreviewCandidate`` logic: the first of
-    :data:`PREVIEW_TRIGGER_KEYS` whose value looks like a URL or path wins.
-    Useful in tests to assert a read-only tool won't spam the preview pane.
-    """
-    for key in PREVIEW_TRIGGER_KEYS:
-        value = details.get(key)
-        if isinstance(value, str) and _looks_like_target(value):
-            return True
-    return False
-
-
-def _looks_like_target(value: str) -> bool:
-    """Match the desktop's ``looksLikePreviewTarget`` heuristic."""
-    v = value.strip()
-    if v.startswith(("http://", "https://", "file://", "/", "./", "../", "~/")):
-        return True
-    return False

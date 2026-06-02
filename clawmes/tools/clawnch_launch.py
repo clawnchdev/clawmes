@@ -207,11 +207,12 @@ def _handle_deploy(args: dict[str, Any]) -> str:
     enrich_tx_links(result, tx_hash=tx_hash or "", chain_id=8453)
     enrich_token_links(result, token=token_address or "", chain_id=8453)
 
-    # Desktop UI: render a launch-receipt card and auto-open it in the side
-    # rail. clawnch_launch is user/LLM-invoked (never scheduler-driven), so a
-    # card-per-call is fine. Best-effort: never fail the launch on UI errors.
+    # Desktop UI: render a launch-receipt card and surface its path at the
+    # envelope top level (json_result ``preview=``) so the desktop opens it in
+    # the preview pane. clawnch_launch is user/LLM-invoked (never
+    # scheduler-driven). Best-effort: never fail the launch on UI errors.
+    preview_path: str | None = None
     try:
-        from clawmes.lib.ui_artifacts import attach_preview
         from clawmes.lib.ui_cards import receipt_card, write_card
 
         rows = [("Symbol", symbol)]
@@ -225,16 +226,16 @@ def _handle_deploy(args: dict[str, Any]) -> str:
             ("Explorer", result.get("explorer_url", "")),
         ]
         card_html = receipt_card(title=f"Launched {symbol}", rows=rows, links=links)
-        attach_preview(result, str(write_card(card_html, f"launch-{symbol}")))
+        preview_path = str(write_card(card_html, f"launch-{symbol}"))
     except Exception:  # noqa: BLE001 — UI is best-effort
-        pass
+        preview_path = None
 
     summary_parts = [f"Launched {symbol} via Clawnch."]
     if token_address:
         summary_parts.append(f"Token: {token_address}")
     if tx_hash:
         summary_parts.append(f"Tx: {tx_hash}")
-    return json_result(result, summary=" ".join(summary_parts))
+    return json_result(result, summary=" ".join(summary_parts), preview=preview_path)
 
 
 def _handle_info(args: dict[str, Any]) -> str:

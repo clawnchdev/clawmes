@@ -139,10 +139,14 @@ class TestSummaryAction:
 
         fake_rpc.balance_responses[(HOLDER.lower(), 8453)] = 10**18
         out = json.loads(defi_balance({"action": "summary", "address": HOLDER, "chain": "base"}))
-        preview = out["details"]["preview"]
+        # preview is an ENVELOPE top-level key (sibling of details) — that's
+        # where the desktop chat tool-card reads it (result.preview), not
+        # details.preview.
+        preview = out["preview"]
         assert preview.endswith(".html")
         assert "portfolio" in preview
         assert os.path.exists(preview)
+        assert "preview" not in out["details"]
 
     def test_summary_card_failure_is_swallowed(self, fake_rpc, monkeypatch):
         # If card rendering blows up, the balance read must still succeed and
@@ -155,7 +159,7 @@ class TestSummaryAction:
         monkeypatch.setattr(ui_cards, "write_card", _boom)
         fake_rpc.balance_responses[(HOLDER.lower(), 8453)] = 10**18
         out = json.loads(defi_balance({"action": "summary", "address": HOLDER, "chain": "base"}))
-        assert "preview" not in out["details"]
+        assert "preview" not in out
         assert any(b["symbol"] == "ETH" for b in out["details"]["balances"])
 
     def test_native_rpc_error(self, fake_rpc):

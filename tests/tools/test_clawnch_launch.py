@@ -68,10 +68,12 @@ class TestDeploy:
         assert fake_svc.deploys[0]["params"] == {"name": "Foo", "symbol": "FOO"}
 
     def test_deploy_attaches_receipt_preview(self, fake_svc):
-        # Desktop UI: a launch-receipt card is written + surfaced for auto-open.
+        # Desktop UI: a launch-receipt card path is surfaced at the envelope
+        # top level (result.preview) where the desktop chat tool-card reads it.
         out = json.loads(clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO"}))
-        assert out["details"]["preview"].endswith(".html")
-        assert "launch-foo" in out["details"]["preview"].lower()
+        assert out["preview"].endswith(".html")
+        assert "launch-foo" in out["preview"].lower()
+        assert "preview" not in out["details"]
 
     def test_deploy_card_failure_is_swallowed(self, fake_svc, monkeypatch):
         # A UI rendering failure must never break the actual launch.
@@ -83,7 +85,7 @@ class TestDeploy:
         monkeypatch.setattr(ui_cards, "write_card", _boom)
         out = json.loads(clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO"}))
         assert out["details"]["txHash"] == "0xtx"
-        assert "preview" not in out["details"]
+        assert "preview" not in out
 
     def test_with_description_image(self, fake_svc):
         clawnch_launch(

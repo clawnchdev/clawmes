@@ -30,6 +30,7 @@ from __future__ import annotations
 import html
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -265,11 +266,13 @@ def connect_card(*, uri: str) -> str:
 def write_card(html_str: str, name: str) -> Path:
     """Write a card to ``${HERMES_HOME}/clawmes/cards/`` and return its path.
 
-    The filename is slugified from ``name`` and suffixed with a timestamp so
-    repeated renders don't clobber each other (the desktop reads the path
-    once at preview time). Returns the absolute path for ``attach_preview``.
+    The filename is slugified from ``name`` and suffixed with a timestamp plus
+    a short random token, so even cards written within the same millisecond
+    (e.g. rapid tool calls) never clobber each other. Returns the absolute path
+    to pass to ``json_result(preview=...)``.
     """
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "card"
-    path = state_dir("cards") / f"{slug}-{int(time.time() * 1000)}.html"
+    suffix = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
+    path = state_dir("cards") / f"{slug}-{suffix}.html"
     path.write_text(html_str, encoding="utf-8")
     return path

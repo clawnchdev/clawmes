@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.16.4 — 2026-06-02
+
+### Fixed — preview cards now actually reach the desktop
+
+A source-level audit of NousResearch/hermes-agent (the gateway event publisher
++ the desktop renderer) revealed the v0.16.0 card mechanism was emitting the
+preview path one level too deep:
+
+- The desktop chat tool-card (`tool-fallback-model.ts` `toolPreviewTarget`)
+  reads the **top level** of the tool-result envelope — `result.preview` /
+  `result.url` — **not** `result.details.preview`. clawmes was placing the
+  card path inside `details`, so cards never rendered as in-app preview
+  attachments (they only appeared as external-open File artifacts).
+
+Fix:
+
+- `json_result` gained a `preview=` keyword that emits an **envelope
+  top-level** `preview` key (sibling of `content`/`details`). `defi_balance`
+  (portfolio) and `clawnch_launch` (receipt) now pass their card path there,
+  so the desktop opens them in the preview pane.
+- Removed `attach_preview` / `will_auto_open` / `PREVIEW_TRIGGER_KEYS` from
+  `ui_artifacts` — they encoded the disproven "details.preview auto-opens"
+  assumption.
+- `write_card` filenames now include a random suffix (not just a ms timestamp)
+  so rapid same-millisecond renders can't collide.
+
+Link enrichment was unaffected by the bug — the desktop Artifacts view
+deep-recurses the result JSON, so `details.*_url` links surfaced correctly all
+along; this release only fixes the card/preview path.
+
 ## 0.16.3 — 2026-06-02
 
 ### Added — scannable QR on the connect card
