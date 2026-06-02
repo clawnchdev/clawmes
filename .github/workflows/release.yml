@@ -71,7 +71,7 @@ jobs:
               def register_tool(self, **kw):
                   self.n += 1
           c = Ctx(); reg(c)
-          assert c.n == 52, f'expected 52 tools, got {c.n}'
+          assert c.n == 53, f'expected 53 tools, got {c.n}'
           print(f'OK: clawmes {clawmes.__version__} \u2014 {c.n} tools register')
           "
 
