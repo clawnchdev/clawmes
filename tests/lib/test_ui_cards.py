@@ -205,7 +205,9 @@ class TestQrSvg:
     def test_returns_empty_on_failure(self, monkeypatch):
         import qrcode
 
-        monkeypatch.setattr(qrcode, "make", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+        monkeypatch.setattr(
+            qrcode, "make", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+        )
         assert ui_cards._qr_svg("wc:abc@2") == ""
 
 
