@@ -191,9 +191,20 @@ async def handle_connect(raw_args: str) -> str:
     uri = state.balances.get("_pair_uri", "")
     if not uri:
         return "WalletConnect pairing started but no URI was returned."
+    # Desktop UI: write a pairing card (URI shown large + copyable) and surface
+    # its path so it appears as a clickable artifact in the desktop. Best-effort.
+    card_line = ""
+    try:
+        from clawmes.lib.ui_cards import connect_card, write_card
+
+        card_path = write_card(connect_card(uri=uri), "connect")
+        card_line = f"Pairing card: {card_path}\n\n"
+    except Exception:  # noqa: BLE001 — UI is best-effort
+        card_line = ""
     return (
         "Scan this QR / open the link on your phone wallet to pair:\n\n"
         f"```\n{uri}\n```\n\n"
+        f"{card_line}"
         "Once you approve in your wallet, your address and chain will "
         "appear automatically. Run /wallet to confirm."
     )

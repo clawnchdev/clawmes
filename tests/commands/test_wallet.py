@@ -75,6 +75,37 @@ class TestConnect:
         out = await wallet_cmd.handle_connect("")
         assert "wc:abc@2" in out
         assert "phone wallet" in out
+        # Desktop UI: a pairing card path is surfaced as a clickable artifact.
+        assert "Pairing card:" in out
+        assert ".html" in out
+
+    @pytest.mark.asyncio
+    async def test_connect_card_failure_is_swallowed(self, monkeypatch, tmp_path):
+        from clawmes.services import wallet as wallet_svc
+        from clawmes.wallet.state import WalletState
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(wallet_svc, "_instance", None)
+        svc = wallet_svc.get_wallet_service()
+        monkeypatch.setattr(
+            svc,
+            "connect_walletconnect",
+            lambda: WalletState(
+                connected=False,
+                mode="walletconnect",
+                balances={"_pair_uri": "wc:abc@2"},
+            ),
+        )
+        import clawmes.lib.ui_cards as ui_cards
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("render failed")
+
+        monkeypatch.setattr(ui_cards, "write_card", _boom)
+        out = await wallet_cmd.handle_connect("")
+        # URI still surfaced; card line simply omitted.
+        assert "wc:abc@2" in out
+        assert "Pairing card:" not in out
 
     @pytest.mark.asyncio
     async def test_connect_no_uri_returned(self, monkeypatch, tmp_path):

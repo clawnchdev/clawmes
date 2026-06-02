@@ -6,6 +6,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.16.0 — 2026-06-02
+
+### Added — Hermes Desktop UI integration
+
+Surface clawmes crypto capabilities natively in the Hermes Desktop app
+(`apps/desktop`). The desktop has no plugin-UI API — it renders tool
+output through generic systems (Artifacts view, structured tool-card
+summary, and an auto-opening side preview pane). This release shapes
+clawmes output to light those systems up.
+
+- **`clawmes/lib/ui_artifacts.py`** — canonical link builders
+  (`explorer_tx_url`, `explorer_address_url`, `explorer_token_url`,
+  `dexscreener_url`, `clanker_url`) plus `enrich_tx_links` /
+  `enrich_token_links` helpers. Links are emitted under descriptive
+  keys (`explorer_url`, `dexscreener_url`, `clanker_url`) so they
+  become clickable **Link artifacts** in the desktop without hijacking
+  the preview pane. `attach_preview` / `will_auto_open` give precise
+  control over the desktop's preview auto-open (`url/target/path/
+  file/filepath/preview` trigger keys).
+
+- **`clawmes/lib/ui_cards.py`** — self-contained, offline,
+  HTML-escaped preview cards rendered to `${HERMES_HOME}/clawmes/cards/`
+  and surfaced under the `preview` key so the desktop auto-opens them in
+  the side rail: `portfolio_card`, `research_card`, `receipt_card`,
+  `connect_card`, plus the `render_card` / `kv_section` / `links_section`
+  primitives.
+
+- **Link enrichment** threaded into `defi_swap`, `bridge`, and
+  `clawnch_launch` — every swap/bridge/launch now surfaces a clickable
+  explorer link (and DexScreener / Clanker / token-explorer links for
+  the relevant token). Safe for scheduler-driven calls (no I/O, passive
+  keys, never auto-opens).
+
+- **Auto-opening cards** wired into `defi_balance` (summary →
+  portfolio dashboard) and `clawnch_launch` (→ launch receipt), and a
+  pairing card surfaced by `/connect`. Card rendering is best-effort —
+  a UI failure never breaks the underlying read or transaction.
+
+- Test isolation: an autouse fixture points `HERMES_HOME` at a per-test
+  temp dir so card/state writes never touch the developer's real
+  `~/.hermes`.
+
 ## 0.15.0 — 2026-05-29
 
 ### Added — trader-focused features

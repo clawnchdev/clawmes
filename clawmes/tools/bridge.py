@@ -199,19 +199,26 @@ def _handle_bridge(args, state) -> str:
         return error_result(f"Bridge broadcast failed: {exc}", code="send_failed")
 
     estimate = quote.get("estimate") or {}
+    result = {
+        "tx_hash": tx_hash,
+        "from_chain": inputs["from_chain"],
+        "to_chain": inputs["to_chain"],
+        "from_token": inputs["from_token"],
+        "to_token": inputs["to_token"],
+        "from_amount": str(estimate.get("fromAmount", "")),
+        "to_amount_min": str(estimate.get("toAmountMin", "")),
+        "execution_duration_seconds": estimate.get("executionDuration"),
+        "tool": quote.get("tool"),
+        "router": to,
+    }
+    # Desktop UI: clickable explorer link for the source-chain tx. get_chain
+    # accepts an int id or short name, so this is robust to either form of
+    # from_chain; an unknown chain simply yields no link.
+    from clawmes.lib.ui_artifacts import enrich_tx_links
+
+    enrich_tx_links(result, tx_hash=tx_hash, chain_id=inputs["from_chain"])
     return json_result(
-        {
-            "tx_hash": tx_hash,
-            "from_chain": inputs["from_chain"],
-            "to_chain": inputs["to_chain"],
-            "from_token": inputs["from_token"],
-            "to_token": inputs["to_token"],
-            "from_amount": str(estimate.get("fromAmount", "")),
-            "to_amount_min": str(estimate.get("toAmountMin", "")),
-            "execution_duration_seconds": estimate.get("executionDuration"),
-            "tool": quote.get("tool"),
-            "router": to,
-        },
+        result,
         summary=(
             f"Bridge submitted on chain {inputs['from_chain']}: {tx_hash}\n"
             f"  → chain {inputs['to_chain']}, expected ≈ "
