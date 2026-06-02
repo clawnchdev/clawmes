@@ -403,10 +403,12 @@ def _send(state, calldata: str, chain_id: int, action: str) -> str:
         )
     except Exception as exc:  # noqa: BLE001
         return error_result(f"{action} failed: {exc}", code="send_failed")
-    return json_result(
-        {"tx_hash": tx_hash, "action": action},
-        summary=f"liquidity {action}: {tx_hash}",
-    )
+    result = {"tx_hash": tx_hash, "action": action, "chain_id": chain_id}
+    # Desktop UI: clickable explorer link for the LP-management tx.
+    from clawmes.lib.ui_artifacts import enrich_tx_links
+
+    enrich_tx_links(result, tx_hash=tx_hash, chain_id=chain_id)
+    return json_result(result, summary=f"liquidity {action}: {tx_hash}")
 
 
 def register(ctx) -> None:
