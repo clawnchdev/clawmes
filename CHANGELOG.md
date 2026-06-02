@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.16.2 — 2026-06-02
+
+### Added — Hermes Desktop UI: complete tx-tool link coverage
+
+- Link enrichment threaded into `nft` (mint / transfer / burn) and
+  `liquidity` (provide / withdraw / compound) via their shared `_send`
+  helpers — each now surfaces a clickable explorer link for the tx.
+  (ERC-721 market links are intentionally omitted from `nft`; DexScreener
+  and Clanker don't apply to NFTs.) This completes explorer-link coverage
+  across every clawmes transaction-producing tool.
+
+### Notes — intentionally deferred
+
+- **Read-tool token links** (`defi_price`, `market_intel`, `cost_basis`):
+  these don't carry a token address + chain pair (CoinGecko ids;
+  chain-agnostic cost tracking), so a correct market link can't be built
+  without guessing — skipped rather than emit wrong links.
+- **Scannable QR** for the connect card needs a QR dependency; kept the
+  plugin dependency-free pending an explicit decision.
+- **Per-toolset descriptions**: the Hermes registration API exposes
+  per-*tool* descriptions only (no per-toolset metadata), so there's
+  nothing to add for the desktop Settings panel.
+
 ## 0.16.1 — 2026-06-02
 
 ### Added — Hermes Desktop UI follow-ups

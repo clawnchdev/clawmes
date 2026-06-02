@@ -241,15 +241,18 @@ def _send(*, state, to, value, data, chain_id, action) -> str:
     except Exception as exc:  # noqa: BLE001
         return error_result(f"{action} failed: {exc}", code="send_failed")
 
-    return json_result(
-        {
-            "tx_hash": tx_hash,
-            "action": action,
-            "contract": to,
-            "chain_id": chain_id,
-        },
-        summary=f"NFT {action}: {tx_hash}",
-    )
+    result = {
+        "tx_hash": tx_hash,
+        "action": action,
+        "contract": to,
+        "chain_id": chain_id,
+    }
+    # Desktop UI: clickable explorer link for the NFT tx. (DexScreener/Clanker
+    # don't apply to ERC-721s, so token-market links are intentionally omitted.)
+    from clawmes.lib.ui_artifacts import enrich_tx_links
+
+    enrich_tx_links(result, tx_hash=tx_hash, chain_id=chain_id)
+    return json_result(result, summary=f"NFT {action}: {tx_hash}")
 
 
 def _handle_read(action: str, args, state, chain_id: int) -> str:
