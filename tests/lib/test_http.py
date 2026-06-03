@@ -24,6 +24,12 @@ class TestAllowlist:
         _check_allowlist("https://api.coingecko.com/api/v3/simple/price")
         _check_allowlist("https://api.basescan.org/api")
 
+    def test_allows_clawnch_apex_and_www(self):
+        # The apex 307-redirects to the www canonical host; both must be
+        # allowed since the client doesn't follow cross-host redirects.
+        _check_allowlist("https://clawn.ch/api/agents/register")
+        _check_allowlist("https://www.clawn.ch/api/agents/register")
+
     def test_rejects_unknown_host(self):
         with pytest.raises(NetworkAllowlistError, match="not on the clawmes network allowlist"):
             _check_allowlist("https://evil.example.com/whatever")

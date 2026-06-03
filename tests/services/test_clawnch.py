@@ -51,6 +51,12 @@ class TestLifecycle:
         svc.start()
         assert svc.health()["status"] == "authenticated"
 
+    def test_base_url_defaults_to_www(self, svc):
+        # Apex clawn.ch 307-redirects to www; the client doesn't follow
+        # cross-host redirects, so the default targets the www host directly.
+        svc.start()
+        assert svc.health()["base_url"] == "https://www.clawn.ch"
+
     def test_base_url_override(self, monkeypatch, svc):
         monkeypatch.setenv("CLAWNCH_BASE_URL", "https://staging.clawn.ch/")
         svc.start()

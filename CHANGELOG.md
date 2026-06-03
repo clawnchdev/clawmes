@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.17.3 — 2026-06-02
+
+### Fixed — clawmes couldn't reach the Clawnch backend in production
+
+The Clawnch apex host `clawn.ch` 307-redirects to the `www.clawn.ch` canonical
+host, but (a) `www.clawn.ch` was not on the network allowlist and (b) the HTTP
+client deliberately does not follow cross-host redirects (an allowlisted host
+redirecting to a non-allowlisted one would otherwise bypass the allowlist). The
+combination meant every Clawnch API call — agent registration, token deploys,
+`leaderboard` / `my_launches` reads — failed with either a 307 error or a
+`NetworkAllowlistError`.
+
+- `lib/http.py`: added `www.clawn.ch` to `_DEFAULT_ALLOWLIST` alongside the
+  apex.
+- `services/clawnch.py`: the default base URL is now `https://www.clawn.ch`
+  (the canonical host, no redirect). `CLAWNCH_BASE_URL` still overrides for
+  staging / local dev.
+
+No config change is needed; existing installs pick this up on update.
+
 ## 0.17.2 — 2026-06-02
 
 ### Reverted — no bundled WalletConnect project ID (security)
