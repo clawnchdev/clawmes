@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.17.1 — 2026-06-02
+
+### Changed — WalletConnect works out of the box (bundled project ID)
+
+A WalletConnect project ID is a *per-application*, public client identifier (a
+dapp ships one for all its users; it's embedded in browser bundles and isn't a
+secret), not a per-user secret. clawmes previously required every user to
+create their own at cloud.walletconnect.com and set `WALLETCONNECT_PROJECT_ID`
+before `/connect` / `clawnchconnect(mode=walletconnect)` would work.
+
+- Bundled a default project ID so WalletConnect pairing works immediately with
+  no setup. `WALLETCONNECT_PROJECT_ID` (e.g. in `~/.hermes/.env`) still
+  **overrides** it for users who want their own relay quota / analytics, and an
+  explicitly-empty value falls back to the default.
+- `hermes clawmes doctor` now reports the WC project ID as OK by default and
+  notes when the bundled default is in use.
+
+Tradeoff: default-id traffic counts against one shared Reown relay quota; set
+your own `WALLETCONNECT_PROJECT_ID` to use a separate quota.
+
 ## 0.17.0 — 2026-06-02
 
 ### Added — `clawmes_info`: agent-callable bridge for the read-only command surface

@@ -160,6 +160,16 @@ class TestBridgeSection:
         section = _bridge_section()
         lines = [ln for ln in section.body.splitlines() if "WC project ID" in ln]
         assert "[ok]" in lines[0]
+        assert "bundled default" not in lines[0]
+
+    def test_project_id_default_when_unset(self, monkeypatch):
+        # A bundled default ships, so WC project ID is always [ok]; when the env
+        # var is unset we note that the default is in use.
+        monkeypatch.delenv("WALLETCONNECT_PROJECT_ID", raising=False)
+        section = _bridge_section()
+        lines = [ln for ln in section.body.splitlines() if "WC project ID" in ln]
+        assert "[ok]" in lines[0]
+        assert "bundled default" in lines[0]
 
 
 class TestPluginSection:
