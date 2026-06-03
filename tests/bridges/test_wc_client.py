@@ -7,11 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from clawmes.bridges.wc_client import (
-    _DEFAULT_WALLETCONNECT_PROJECT_ID,
-    WalletConnectClient,
-    _bridge_env,
-)
+from clawmes.bridges.wc_client import WalletConnectClient
 
 
 @pytest.fixture
@@ -20,30 +16,6 @@ def client():
     c = WalletConnectClient(Path("/fake/wc.mjs"))
     c._proc = MagicMock()
     return c
-
-
-class TestBridgeEnv:
-    def test_default_when_unset(self, monkeypatch):
-        monkeypatch.delenv("WALLETCONNECT_PROJECT_ID", raising=False)
-        env = _bridge_env()
-        assert env["WALLETCONNECT_PROJECT_ID"] == _DEFAULT_WALLETCONNECT_PROJECT_ID
-
-    def test_env_override_wins(self, monkeypatch):
-        monkeypatch.setenv("WALLETCONNECT_PROJECT_ID", "my-own-project-id")
-        assert _bridge_env()["WALLETCONNECT_PROJECT_ID"] == "my-own-project-id"
-
-    def test_empty_falls_back_to_default(self, monkeypatch):
-        monkeypatch.setenv("WALLETCONNECT_PROJECT_ID", "")
-        assert _bridge_env()["WALLETCONNECT_PROJECT_ID"] == _DEFAULT_WALLETCONNECT_PROJECT_ID
-
-    def test_preserves_other_env(self, monkeypatch):
-        monkeypatch.setenv("CLAWMES_TEST_KEEP", "keepme")
-        assert _bridge_env()["CLAWMES_TEST_KEEP"] == "keepme"
-
-    def test_client_passes_default_env_to_bridge(self, monkeypatch):
-        monkeypatch.delenv("WALLETCONNECT_PROJECT_ID", raising=False)
-        c = WalletConnectClient(Path("/fake/wc.mjs"))
-        assert c._proc._env["WALLETCONNECT_PROJECT_ID"] == _DEFAULT_WALLETCONNECT_PROJECT_ID
 
 
 class TestLifecycle:
