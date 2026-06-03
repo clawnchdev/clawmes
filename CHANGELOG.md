@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.17.2 — 2026-06-02
+
+### Reverted — no bundled WalletConnect project ID (security)
+
+0.17.1 bundled a default WalletConnect project ID so pairing worked with no
+setup. That was a mistake: a project id baked into an open-source client ships
+publicly (the repo + the PyPI sdist), where anyone can extract it and burn the
+shared Reown relay quota — degrading WalletConnect for all users. Reown's own
+guidance is "avoid committing project keys to the repo; use env variables."
+
+- Removed the bundled default. `WALLETCONNECT_PROJECT_ID` is supplied per-user
+  via the environment (typically `~/.hermes/.env`); the WC bridge inherits it.
+  When unset, WalletConnect returns a clear "set WALLETCONNECT_PROJECT_ID"
+  error and `hermes clawmes doctor` reports it as not-configured with a setup
+  hint.
+- The 0.17.1 default id has been **rotated out and disabled** in Reown, so it is
+  dead regardless.
+
+For a shared, zero-setup project id done safely, the only sound approach is a
+server-side relay proxy (the id never reaches clients) — tracked as future
+work; not bundling a public key.
+
 ## 0.17.1 — 2026-06-02
 
 ### Changed — WalletConnect works out of the box (bundled project ID)

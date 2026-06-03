@@ -206,16 +206,15 @@ def _bridge_section() -> _Section:
         )
     )
 
-    # Project ID — a bundled default ships so WalletConnect works out of the
-    # box; the env var overrides it. So this is always "ok"; we just note when
-    # the default is in use.
+    # Project ID — required, supplied per-user (no bundled default; see
+    # bridges/wc_client.py for why). Reports not-configured until it's set.
     pid = os.environ.get("WALLETCONNECT_PROJECT_ID")
     rows.append(
         (
-            "[ok]   ",
+            "[ok]   " if pid else "[----] ",
             "WC project ID",
             "WALLETCONNECT_PROJECT_ID",
-            "" if pid else "bundled default (set WALLETCONNECT_PROJECT_ID to use your own)",
+            "" if pid else "free at https://cloud.reown.com — set in ~/.hermes/.env",
         )
     )
 
