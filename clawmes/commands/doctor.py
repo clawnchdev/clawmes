@@ -206,14 +206,16 @@ def _bridge_section() -> _Section:
         )
     )
 
-    # Project ID
+    # Project ID — a bundled default ships so WalletConnect works out of the
+    # box; the env var overrides it. So this is always "ok"; we just note when
+    # the default is in use.
     pid = os.environ.get("WALLETCONNECT_PROJECT_ID")
     rows.append(
         (
-            "[ok]   " if pid else "[----] ",
+            "[ok]   ",
             "WC project ID",
             "WALLETCONNECT_PROJECT_ID",
-            "" if pid else "free at https://cloud.walletconnect.com",
+            "" if pid else "bundled default (set WALLETCONNECT_PROJECT_ID to use your own)",
         )
     )
 
