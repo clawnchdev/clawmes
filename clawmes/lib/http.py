@@ -98,7 +98,10 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         "bv7x.ai",
         # Clawnch launchpad HTTP API — see services.clawnch for the deploy /
         # agent-registration flow used by /launch and clawnch_launch tool.
+        # The apex 307-redirects to the www canonical host, so both must be
+        # allowed (the client doesn't follow cross-host redirects by design).
         "clawn.ch",
+        "www.clawn.ch",
         # Simulation
         "api.tenderly.co",
         # Fiat ramps

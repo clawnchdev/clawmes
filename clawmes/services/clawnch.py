@@ -48,7 +48,10 @@ _log = logger_for("services.clawnch")
 
 #: Base URL of the Clawnch HTTP API. Override via ``CLAWNCH_BASE_URL`` for
 #: staging / local dev. The service uses ``/api/...`` paths underneath.
-_BASE_URL = os.environ.get("CLAWNCH_BASE_URL", "https://clawn.ch")
+#: Defaults to the ``www`` canonical host: the apex ``clawn.ch`` 307-redirects
+#: to ``www.clawn.ch`` and our HTTP client doesn't follow cross-host redirects,
+#: so targeting the apex would fail every request.
+_BASE_URL = os.environ.get("CLAWNCH_BASE_URL", "https://www.clawn.ch")
 
 #: Source tag attached to every deploy made through clawmes. Lets the
 #: launchpad render a "launched via clawmes" badge on launch detail pages.

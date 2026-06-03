@@ -1,6 +1,6 @@
 [project]
 name = "clawmes"
-version = "0.17.2"
+version = "0.17.3"
 description = "Hermes Agent plugin for crypto: wallets, DEX trading, lending and staking, governance, on-chain automation."
 readme = "README.md"
 license = { text = "MIT" }
