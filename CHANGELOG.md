@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.18.1 — 2026-06-09
+
+### Fixed — Venice: distinguish "out of credits" from "bad auth"
+
+Venice returns HTTP 402 for two different conditions: a missing/invalid key
+("authentication required") and a valid key on an account with no funds
+("insufficient USD or Diem balance"). The service previously classified both as
+`no_credentials`. The balance case now raises `VeniceError("payment_required",
+…)` so the error is actionable (add credits at venice.ai/settings/api vs fix the
+key). Surfaced while live-testing a real key.
+
 ## 0.18.0 — 2026-06-09
 
 ### Added — Venice AI inference provider

@@ -59,9 +59,12 @@ class VeniceError(RuntimeError):
         code, HTTP 404, or a message containing both "model" and "not found".
       * ``rate_limited`` — OpenAI ``rate_limit_exceeded`` / ``rate_limit_error``,
         HTTP 429.
-      * ``no_credentials`` — HTTP 401 / 403, or HTTP 402 (Venice's x402
-        "authentication required" / pay-per-call challenge), or OpenAI
-        ``authentication_error`` / ``permission_denied``.
+      * ``no_credentials`` — HTTP 401 / 403, or an HTTP 402 "authentication
+        required" challenge (no/invalid key), or OpenAI ``authentication_error``
+        / ``permission_denied``.
+      * ``payment_required`` — HTTP 402 where the key is valid but the Venice
+        account is out of funds ("insufficient USD or Diem balance"). Distinct
+        from ``no_credentials`` because the fix is "add credits", not "fix auth".
       * ``api_error`` — generic upstream failure.
     """
 
@@ -193,9 +196,17 @@ class VeniceService(Service):
             # Venice's auth/payment errors are a flat ``{"error": "..."}`` with
             # an HTTP 402 x402 challenge. Classify by status code in the
             # exception string (lib/http embeds it), with a keyword fallback.
+            # The 402 has two distinct meanings: a missing/invalid key
+            # ("authentication required") vs a valid key with an empty account
+            # ("insufficient … balance" — add credits). Split them so the code
+            # is actionable. Match on the body message (``detail``), since the
+            # exception text always contains the "402 Payment Required" status.
             msg = str(exc).lower()
             flat = body_dict.get("error") if isinstance(body_dict, dict) else None
             detail = flat if isinstance(flat, str) and flat else str(exc)
+            low = detail.lower()
+            if "insufficient" in low or "balance" in low or "add credits" in low:
+                raise VeniceError("payment_required", detail) from exc
             if "402" in msg or "401" in msg or "403" in msg or "authentication required" in msg:
                 raise VeniceError("no_credentials", detail) from exc
             if "429" in msg or "rate limit" in msg:
