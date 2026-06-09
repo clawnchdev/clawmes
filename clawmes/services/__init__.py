@@ -64,6 +64,7 @@ def start_all() -> None:
     from clawmes.services.sniper_scheduler import get_sniper_scheduler_service
     from clawmes.services.token_decimals import get_token_decimals_service
     from clawmes.services.token_gate import get_token_gate_service
+    from clawmes.services.venice import get_venice_service
     from clawmes.services.wallet import get_wallet_service
     from clawmes.services.wc_notifications import get_wc_notification_consumer
     from clawmes.services.zerox import get_zerox_service
@@ -136,6 +137,11 @@ def start_all() -> None:
         #     Hermes agent loop. Independent from Hermes' main LLM —
         #     the agent's conversational inference is owned upstream.
         get_opengateway_service,
+        # 6e. Venice AI — OpenAI-compatible privacy-first inference provider.
+        #     Same role as OpenGateway (targeted inference for tools), independent
+        #     from Hermes' main LLM. Requires VENICE_API_KEY (Venice answers
+        #     unauthenticated calls with HTTP 402 / x402).
+        get_venice_service,
         # 7. Background daemons — last so they pick up everything above.
         get_scheduler,  # ticking=True; needs cron driver to actually fire
         # 7a. DCA scheduler — ticking=True. Fires due /dca schedules on
