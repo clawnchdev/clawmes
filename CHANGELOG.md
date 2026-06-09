@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.18.0 — 2026-06-09
+
+### Added — Venice AI inference provider
+
+A new `venice` service (`clawmes/services/venice.py`) — an OpenAI-compatible
+client for Venice AI (https://docs.venice.ai/models/overview), alongside the
+existing OpenGateway provider. Lets tools run targeted inference (classifiers,
+summarizers, structured-extraction helpers) outside the host Hermes agent loop.
+
+- Base URL `https://api.venice.ai/api/v1`; configured via `VENICE_API_KEY`
+  (required — Venice answers unauthenticated calls with HTTP 402 / x402) and an
+  optional `VENICE_MODEL` default. Non-streaming chat completions only.
+- Robust error classification including Venice's flat `{"error": "..."}` + HTTP
+  402 auth challenge (→ `no_credentials`) in addition to OpenAI-style envelopes.
+- `api.venice.ai` added to the network allowlist.
+- Independent from Hermes' main conversational LLM (that's a Hermes-level
+  concern); this is opt-in, per-call inference for clawmes tools.
+
+Verified live against the Venice API (the 402 auth path) and with full unit
+coverage of the success + every error path.
+
 ## 0.17.3 — 2026-06-02
 
 ### Fixed — clawmes couldn't reach the Clawnch backend in production

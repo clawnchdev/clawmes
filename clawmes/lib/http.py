@@ -90,8 +90,10 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         # Bankr
         "api.bankr.bot",
         "llm.bankr.bot",
-        # LLM inference gateway (gitlawb opengateway — see services.opengateway)
+        # LLM inference gateways (OpenAI-compatible) — see services.opengateway
+        # and services.venice.
         "opengateway.gitlawb.com",
+        "api.venice.ai",
         # Agent-economy peers — see services.bv7x and the A2A protocol
         # support in tools.a2a_call. bv7x.ai exposes a JSON-RPC 2.0 A2A
         # endpoint as well as a public REST oracle.

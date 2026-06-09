@@ -30,6 +30,11 @@ class TestAllowlist:
         _check_allowlist("https://clawn.ch/api/agents/register")
         _check_allowlist("https://www.clawn.ch/api/agents/register")
 
+    def test_allows_llm_inference_gateways(self):
+        # OpenAI-compatible inference providers (services.opengateway / venice).
+        _check_allowlist("https://opengateway.gitlawb.com/v1/chat/completions")
+        _check_allowlist("https://api.venice.ai/api/v1/chat/completions")
+
     def test_rejects_unknown_host(self):
         with pytest.raises(NetworkAllowlistError, match="not on the clawmes network allowlist"):
             _check_allowlist("https://evil.example.com/whatever")

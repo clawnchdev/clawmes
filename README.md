@@ -565,6 +565,10 @@ OPENGATEWAY_API_KEY=  # ogw_live_… — recommended; service runs unauthenticat
                       # during the gitlawb partnership window (auth optional today)
 OPENGATEWAY_MODEL=    # optional default model id sent when callers omit model=
 
+# Venice AI (privacy-first, OpenAI-compatible — https://docs.venice.ai/models/overview)
+VENICE_API_KEY=       # required — Venice answers unauthenticated calls with HTTP 402 (x402)
+VENICE_MODEL=         # optional default model id (catalog: GET https://api.venice.ai/api/v1/models)
+
 # Market data + analytics
 COINGECKO_API_KEY=
 HERD_ACCESS_TOKEN=
