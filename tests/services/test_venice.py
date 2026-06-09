@@ -425,8 +425,8 @@ class TestStructuredErrorBodyExtraction:
         assert exc_info.value.code == "model_not_found"
         assert "Unsupported model" in exc_info.value.message
 
-    def test_venice_flat_error_402(self, svc, fake_http):
-        # Venice's real unauth body: flat {"error": "Authentication required"} + 402.
+    def test_venice_flat_error_402_auth(self, svc, fake_http):
+        # Venice's real no-key body: flat {"error": "Authentication required"} + 402.
         exc = _err_with_body(
             "Client error '402 Payment Required' for url",
             {"x402Version": 2, "error": "Authentication required"},
@@ -437,6 +437,22 @@ class TestStructuredErrorBodyExtraction:
         assert exc_info.value.code == "no_credentials"
         # The flat error string is surfaced as the detail.
         assert exc_info.value.message == "Authentication required"
+
+    def test_venice_flat_error_402_insufficient_balance(self, svc, fake_http):
+        # Real body when the key is valid but the account is empty: a 402 that
+        # must classify as payment_required (add credits), NOT no_credentials.
+        exc = _err_with_body(
+            "Client error '402 Payment Required' for url",
+            {
+                "error": "Insufficient USD or Diem balance to complete request. "
+                "Visit https://venice.ai/settings/api to add credits."
+            },
+        )
+        fake_http.responses.append(exc)
+        with pytest.raises(VeniceError) as exc_info:
+            self._call(svc)
+        assert exc_info.value.code == "payment_required"
+        assert "Insufficient" in exc_info.value.message
 
     def test_response_json_raises_falls_through_to_substring(self, svc, fake_http):
         exc = _err_with_body("Client error '400 Bad Request' for url", ValueError("not json"))
