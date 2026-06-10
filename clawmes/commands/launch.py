@@ -780,9 +780,8 @@ async def _check(sender_id: str) -> str:
         # cleanly without running a half-baked deploy. Render the error
         # as a checklist hint rather than a generic failure.
         if exc.code == "burn_required":
-            return (
-                "Check: params OK, but no verified burn attached.\n\n"
-                + _render_burn_required(exc)
+            return "Check: params OK, but no verified burn attached.\n\n" + _render_burn_required(
+                exc
             )
         if exc.code == "bad_request":
             hint = "Fix the param flagged below, then re-run /launch check."

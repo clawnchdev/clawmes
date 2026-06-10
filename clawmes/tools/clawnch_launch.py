@@ -212,9 +212,7 @@ def _handle_deploy(args: dict[str, Any]) -> str:
         if exc.code == "burn_required":
             meta = exc.meta or {}
             min_tokens = str(meta.get("minBurnTokens") or "1000000")
-            burn_addr = str(
-                meta.get("burnAddress") or "0x000000000000000000000000000000000000dEaD"
-            )
+            burn_addr = str(meta.get("burnAddress") or "0x000000000000000000000000000000000000dEaD")
             return error_result(
                 f"{exc.message} Burn {min_tokens}+ CLAWNCH to {burn_addr} "
                 "from the agent's wallet (the /burn command signs + submits "
