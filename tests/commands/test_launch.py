@@ -704,6 +704,21 @@ class TestNonCustodialConfirm:
         assert "1,000,000+" in out
         assert "dEaD" in out
 
+    async def test_prepare_burn_required_non_numeric_min_passes_through(
+        self, fake_wallet_state, fake_prepare, fake_wallet_mode
+    ):
+        """A non-numeric minBurnTokens is surfaced verbatim, not crashed on."""
+        fake_prepare["raise"] = ClawnchError(
+            "burn_required",
+            "burn first",
+            meta={"minBurnTokens": "one million"},
+        )
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("confirm", sender_id="alice")
+        assert "one million+" in out
+        assert "dEaD" in out
+
     async def test_prepare_other_clawnch_error(
         self, fake_wallet_state, fake_prepare, fake_wallet_mode
     ):
