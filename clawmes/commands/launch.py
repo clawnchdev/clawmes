@@ -20,7 +20,8 @@ Steps:
     ``/launch discord <url>``             (optional)
 
   Flow:
-    ``/launch bypass <tx_hash>``          (optional — skip 24h cooldown)
+    ``/launch burn <amount|tx_hash>``     (required — every launch needs a verified 1M+ $CLAWNCH burn)
+    ``/launch bypass <tx_hash>``          (optional — skip 24h cooldown, custodial only)
     ``/launch status``                    (show draft)
     ``/launch confirm``                   (deploy)
     ``/launch cancel``                    (clear)
@@ -223,7 +224,7 @@ async def handle_launch(raw_args: str, **kwargs: Any) -> str:
             "  /launch farcaster <handle>    — Farcaster\n"
             "  /launch discord <url>         — Discord\n"
             "  /launch bypass <tx_hash>      — skip 24h cooldown (custodial mode only)\n"
-            "  /launch burn <amount|tx_hash> — burn $CLAWNCH for vault allocation\n"
+            "  /launch burn <amount|tx_hash> — burn $CLAWNCH (required to launch: ≥1M; also sets vault %)\n"
             "  /launch status                — show current draft\n"
             "  /launch confirm               — deploy (non-custodial by default)\n"
             "  /launch confirm --custodial   — deploy via Clawnch's custodial deployer\n"
@@ -255,7 +256,7 @@ def _render_usage(draft: dict[str, Any]) -> str:
         "",
         "Flow:",
         "  /launch bypass <tx_hash>         (skip 24h cooldown — custodial only)",
-        "  /launch burn <amount|tx_hash>    (burn $CLAWNCH for vault allocation)",
+        "  /launch burn <amount|tx_hash>    (burn $CLAWNCH — required to launch: ≥1M; also sets vault %)",
         "  /launch status                   (show draft)",
         "  /launch confirm                  (deploy via wallet — non-custodial default)",
         "  /launch confirm --custodial      (deploy via Clawnch deployer wallet)",
@@ -312,13 +313,18 @@ async def _handle_burn(sender_id: str, rest: str) -> str:
     forwarded to the Clawnch ``/api/deploy`` endpoint on confirm.
     Clawnch's backend verifies the burn (sender, recipient, amount,
     timing) and applies the corresponding vault allocation.
+
+    The burn is **mandatory**: every launch path requires a verified
+    1M+ $CLAWNCH burn — deploys without one are rejected with
+    ``burn_required``. The vault % is the bonus the same burn earns.
     """
     draft = _get_draft(sender_id)
     if not rest:
         return (
             "Usage: /launch burn <amount> | /launch burn <tx_hash>\n"
-            "  Amount: whole CLAWNCH (>= 1,000,000 for 1% vault, max 10,000,000 for 10%).\n"
-            "  Tx hash: 0x... if you already burned externally."
+            "  Amount: whole CLAWNCH (>= 1,000,000 — required to launch; 1M = 1% vault, max 10,000,000 = 10%).\n"
+            "  Tx hash: 0x... if you already burned externally.\n"
+            "  A verified burn is required for every launch."
         )
 
     if _looks_like_tx_hash(rest):
@@ -331,8 +337,9 @@ async def _handle_burn(sender_id: str, rest: str) -> str:
         return f"Invalid burn input {rest!r}. Expected an amount (e.g. 1000000) or 0x tx hash."
     if amount < 1_000_000:
         return (
-            f"Burn amount too low: {amount:,} CLAWNCH (minimum 1,000,000 for 1% vault).\n"
-            "See https://clawn.ch/docs/burn for the vault curve."
+            f"Burn amount too low: {amount:,} CLAWNCH "
+            "(minimum 1,000,000 — required to launch; grants 1% vault).\n"
+            "See https://clawn.ch/docs.md for the burn rules + vault curve."
         )
 
     return await _submit_burn(draft, amount)
@@ -379,6 +386,33 @@ async def _submit_burn(draft: dict[str, Any], whole_tokens: int) -> str:
         f"  Tx: {tx_hash}\n"
         f"  Basescan: https://basescan.org/tx/{tx_hash}\n"
         "Wait for confirmation, then /launch confirm to deploy with vault allocation."
+    )
+
+
+def _render_burn_required(exc: Any) -> str:
+    """Render the mandatory-burn rejection with exact instructions.
+
+    The Clawnch backend rejects every launch that lacks a verified
+    1M+ $CLAWNCH burn (HTTP 402, ``code="burn_required"``). The error's
+    ``meta`` block carries the requirements — surface them verbatim so
+    the user knows exactly what to burn and where.
+    """
+    meta = getattr(exc, "meta", None) or {}
+    min_tokens = str(meta.get("minBurnTokens") or "1000000")
+    burn_addr = str(meta.get("burnAddress") or "0x000000000000000000000000000000000000dEaD")
+    try:
+        pretty_min = f"{int(min_tokens):,}"
+    except ValueError:
+        pretty_min = min_tokens
+    return (
+        f"Launching requires a verified burn of {pretty_min}+ $CLAWNCH "
+        f"from your wallet to {burn_addr} (within 24h of the deploy).\n"
+        "\n"
+        "  /launch burn <amount>    — sign + submit the burn now (e.g. /launch burn 1000000)\n"
+        "  /launch burn <tx_hash>   — attach a burn you already submitted\n"
+        "\n"
+        "Then re-run /launch confirm. The same burn claims your vault "
+        "allocation (1M = 1%, up to 10M = 10%), so the minimum is never wasted."
     )
 
 
@@ -505,6 +539,8 @@ async def _confirm_noncustodial(
             burn_tx_hash=burn,
         )
     except ClawnchError as exc:
+        if exc.code == "burn_required":
+            return _render_burn_required(exc)
         msg = f"Prepare failed ({exc.code}): {exc.message}"
         if exc.code == "rate_limited":
             msg += "\n\nPer-wallet prepare limit reached (10/day). Try again after 00:00 UTC."
@@ -602,6 +638,8 @@ async def _confirm_custodial(
             burn_tx_hash=burn,
         )
     except ClawnchError as exc:
+        if exc.code == "burn_required":
+            return _render_burn_required(exc)
         msg = f"Launch failed ({exc.code}): {exc.message}"
         if exc.code == "no_credentials":
             msg += "\n\nRun /register_agent <name> <description> to get a key, or drop --custodial to use the wallet-signed path."
@@ -741,6 +779,11 @@ async def _check(sender_id: str) -> str:
         # The whole point of `check` is to surface validation failures
         # cleanly without running a half-baked deploy. Render the error
         # as a checklist hint rather than a generic failure.
+        if exc.code == "burn_required":
+            return (
+                "Check: params OK, but no verified burn attached.\n\n"
+                + _render_burn_required(exc)
+            )
         if exc.code == "bad_request":
             hint = "Fix the param flagged below, then re-run /launch check."
         elif exc.code == "rate_limited":
@@ -765,7 +808,10 @@ async def _check(sender_id: str) -> str:
     elif burn:
         lines.append("  Vault:      0% — burn hash recorded but produced no vault %")
     else:
-        lines.append("  Vault:      0% (no burn — /burn <amount> to claim)")
+        # A no-burn prepare normally 402s (burn_required) before we get
+        # here; reaching this line without a burn means the wallet is
+        # exempted server-side.
+        lines.append("  Vault:      0% (no burn attached — /burn <amount> to claim)")
     if not state.address:
         lines.append("")
         lines.append(
@@ -820,6 +866,11 @@ async def _export(sender_id: str) -> str:
             burn_tx_hash=draft.get("burn_tx_hash"),
         )
     except ClawnchError as exc:
+        if exc.code == "burn_required":
+            return (
+                "Export failed: the launchpad requires a verified burn "
+                "before it will return calldata.\n\n" + _render_burn_required(exc)
+            )
         return f"Export failed ({exc.code}): {exc.message}"
     except Exception as exc:  # noqa: BLE001
         return f"Export failed: {exc}"

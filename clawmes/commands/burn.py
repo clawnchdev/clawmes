@@ -1,9 +1,13 @@
 """``/burn`` slash command — standalone $CLAWNCH burn.
 
 Decoupled from the launch flow so users can burn at any time —
-before drafting a launch, between launches, or just to claim a
-Clanker vault allocation on a deploy they're planning to do
-later from Base MCP / Claude Desktop / another agent surface.
+before drafting a launch, between launches, or ahead of a deploy
+they're planning to do later from Base MCP / Claude Desktop /
+another agent surface.
+
+A verified 1,000,000+ $CLAWNCH burn is **required for every launch**
+(the launchpad rejects no-burn deploys with ``burn_required``); the
+same burn claims the Clanker vault allocation as a bonus.
 
 Two input modes:
 
@@ -71,7 +75,8 @@ def _parse_amount(raw: str) -> int | str:
         return f"Invalid amount {raw!r}. Expected a positive integer (e.g. 1000000)."
     if amount < _MIN_BURN_TOKENS:
         return (
-            f"Burn amount too low: {amount:,} CLAWNCH (minimum {_MIN_BURN_TOKENS:,} for 1% vault)."
+            f"Burn amount too low: {amount:,} CLAWNCH "
+            f"(minimum {_MIN_BURN_TOKENS:,} — required to launch; grants 1% vault)."
         )
     if amount > _MAX_BURN_TOKENS:
         return (
@@ -108,7 +113,7 @@ async def handle_burn(raw_args: str, **kwargs: Any) -> str:
 
 def _render_usage(last: dict[str, Any] | None) -> str:
     lines = [
-        "Burn $CLAWNCH for vault allocation on your next launch.",
+        "Burn $CLAWNCH — required for every launch (min 1M); claims vault allocation.",
         "",
         "Usage:",
         "  /burn <amount>          — sign + submit a CLAWNCH burn from your wallet",
@@ -189,6 +194,6 @@ def register(ctx) -> None:
     ctx.register_command(
         name="burn",
         handler=handle_burn,
-        description="Burn $CLAWNCH from the active wallet for vault allocation",
+        description="Burn $CLAWNCH from the active wallet (required to launch; claims vault %)",
         args_hint="<amount> | last",
     )

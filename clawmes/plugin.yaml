@@ -1,5 +1,5 @@
 name: clawmes
-version: 0.18.2
+version: 0.19.0
 description: Hermes Agent for crypto. Wallet, swaps, DeFi, launches, automation.
 author: Clawnch
 kind: standalone
@@ -103,7 +103,7 @@ requires_env:
     url: https://bv7x.ai/terminal#developer
     secret: true
   - name: CLAWNCH_API_KEY
-    description: Clawnch agent API key; required for /launch (token deploy via Clawnch launchpad). Issue via /register_agent in clawmes.
+    description: Clawnch agent API key; required for custodial /launch deploys (non-custodial path needs no key). Every launch additionally requires a verified 1M+ $CLAWNCH burn (/burn). Issue the key via /register_agent in clawmes.
     url: https://clawn.ch
     secret: true
   - name: OPENGATEWAY_API_KEY

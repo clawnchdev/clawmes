@@ -195,7 +195,7 @@ def _request(
     import httpx
     from tenacity import (
         retry,
-        retry_if_exception_type,
+        retry_if_exception,
         stop_after_attempt,
         wait_exponential,
     )
@@ -204,10 +204,21 @@ def _request(
     if headers:
         merged_headers.update(headers)
 
+    def _retryable(exc: BaseException) -> bool:
+        """Retry transport errors and 5xx only.
+
+        4xx is deterministic — the request itself is wrong (or, e.g.,
+        402 burn_required / 429 rate-limit) and retrying just burns
+        time and rate-limit budget before surfacing the same error.
+        This enforces the module-docstring promise that 4xx is never
+        retried.
+        """
+        if isinstance(exc, httpx.HTTPStatusError):
+            return exc.response.status_code >= 500
+        return isinstance(exc, httpx.TransportError)
+
     @retry(
-        retry=retry_if_exception_type(
-            (httpx.TransportError, httpx.HTTPStatusError),
-        ),
+        retry=retry_if_exception(_retryable),
         wait=wait_exponential(multiplier=1, min=1, max=8),
         stop=stop_after_attempt(3),
         reraise=True,

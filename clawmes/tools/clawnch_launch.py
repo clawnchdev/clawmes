@@ -7,7 +7,10 @@ launchpad HTTP API. Two actions:
   * ``deploy`` — submit a deploy. Service handles the captcha
     challenge (sign message + read storage slot + compute keccak
     proof), then posts the solution. Clawnch's deployer wallet pays
-    gas + submits the underlying Clanker tx server-side. Optional
+    gas + submits the underlying Clanker tx server-side. Requires
+    ``burn_tx_hash`` — every launch needs a verified 1,000,000+
+    $CLAWNCH burn (the launchpad rejects no-burn deploys with
+    ``burn_required``); the same burn sets the vault %. Optional
     ``bypass_tx_hash`` skips the 24h cooldown by paying ETH to the
     bypass recipient (see ``CLAWNCH_BYPASS_RECIPIENT``).
   * ``info`` — read launch metadata for an existing token.
@@ -115,9 +118,20 @@ _SCHEMA: dict[str, Any] = {
         "bypass_tx_hash": {
             "type": "string",
             "description": (
-                "Tx hash of >= 0.001 ETH paid to the Clawnch bypass "
+                "Tx hash of >= 0.005 ETH paid to the Clawnch bypass "
                 "recipient. Skips the 24h deploy cooldown (deploy, "
                 "optional)."
+            ),
+        },
+        "burn_tx_hash": {
+            "type": "string",
+            "description": (
+                "Tx hash of a verified 1,000,000+ $CLAWNCH burn from "
+                "the agent's wallet to the dead address within 24h. "
+                "Required for every deploy — the launchpad rejects "
+                "no-burn launches with code 'burn_required'. The same "
+                "burn sets the Clanker vault % (1M = 1%, 10M = 10%). "
+                "Use the /burn command to sign + submit one."
             ),
         },
         "token": {
@@ -140,9 +154,11 @@ _SCHEMA: dict[str, Any] = {
         "Deploy a token on Base via the Clawnch launchpad. Clawnch "
         "handles the deploy + initial liquidity atomically via the "
         "Clanker SDK; the user's wallet signs a captcha challenge to "
-        "prove identity. Supports image + social metadata (twitter / "
-        "website / telegram / farcaster / discord). Requires "
-        "CLAWNCH_API_KEY (register an agent with /register_agent)."
+        "prove identity. Every deploy requires burn_tx_hash — a "
+        "verified 1,000,000+ $CLAWNCH burn (use /burn to submit one). "
+        "Supports image + social metadata (twitter / website / "
+        "telegram / farcaster / discord). Requires CLAWNCH_API_KEY "
+        "(register an agent with /register_agent)."
     ),
     schema=_SCHEMA,
     emoji="\U0001f31f",
@@ -184,13 +200,27 @@ def _handle_deploy(args: dict[str, Any]) -> str:
         token_params["metadata"] = {"socialMediaUrls": socials}
 
     bypass = read_str(args, "bypass_tx_hash") or None
+    burn = read_str(args, "burn_tx_hash") or None
 
     try:
         result = get_clawnch_service().deploy(
             token_params=token_params,
             bypass_tx_hash=bypass,
+            burn_tx_hash=burn,
         )
     except ClawnchError as exc:
+        if exc.code == "burn_required":
+            meta = exc.meta or {}
+            min_tokens = str(meta.get("minBurnTokens") or "1000000")
+            burn_addr = str(
+                meta.get("burnAddress") or "0x000000000000000000000000000000000000dEaD"
+            )
+            return error_result(
+                f"{exc.message} Burn {min_tokens}+ CLAWNCH to {burn_addr} "
+                "from the agent's wallet (the /burn command signs + submits "
+                "one), then retry with burn_tx_hash=<tx hash>.",
+                code=exc.code,
+            )
         return error_result(exc.message, code=exc.code)
     except Exception as exc:  # noqa: BLE001
         return error_result(f"Launch failed: {exc}", code="api_error")

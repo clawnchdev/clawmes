@@ -1,7 +1,7 @@
 ---
 name: clawnch-launch
-description: Deploy a token on Base via the Clawnch launchpad using the /launch command or clawnch_launch tool. Walks users through register-agent -> sign captcha -> custodial deploy via Clanker.
-tags: [clawnch, launchpad, deploy, token, agent, base, clanker]
+description: Deploy a token on Base via the Clawnch launchpad using the /launch command or clawnch_launch tool. Every launch requires a verified 1M+ $CLAWNCH burn (/burn). Walks users through burn -> register-agent -> sign captcha -> deploy via Clanker.
+tags: [clawnch, launchpad, deploy, token, agent, base, clanker, burn]
 ---
 
 # clawmes:clawnch-launch
@@ -24,6 +24,30 @@ Plus **`/register_agent`** to obtain the API key required for deploys.
 * User wants to read fee accrual or volume on a Clawnch-launched
   token.
 * User got a rate-limit error and asks about the bypass.
+* User got a `burn_required` error or asks what a launch costs.
+
+## Launch cost: the mandatory $CLAWNCH burn
+
+**Every launch requires a verified burn of >= 1,000,000 $CLAWNCH**
+(token `0xa1F72459dfA10BAD200Ac160eCd78C6b77a747be`) from the
+launching wallet to the dead address
+(`0x000000000000000000000000000000000000dEaD`) on Base, within 24h
+of the deploy. Deploys without one are rejected with
+`burn_required` (HTTP 402) — the error's `meta` carries
+`minBurnTokens` + `burnAddress`.
+
+The same burn claims the Clanker vault allocation as a bonus:
+1M = 1% vault, scaling linearly to 10M = 10% (the Clanker max).
+The minimum burn is never wasted.
+
+Flow: `/burn 1000000` (signs + submits the transfer from the active
+wallet) -> wait for confirmation -> `/launch burn <tx_hash>` (or it
+auto-attaches in the same draft via `/launch burn <amount>`) ->
+`/launch confirm`.
+
+The burn is an irreversible spend — state this explicitly and get a
+separate confirmation for the burn before submitting it. Never bundle
+the burn confirmation into the deploy confirmation.
 
 ## How a deploy actually happens
 
@@ -31,7 +55,7 @@ End-to-end flow when the user runs `/launch confirm`:
 
 ```
 1. Clawmes -> POST clawn.ch/api/deploy  (with CLAWNCH_API_KEY)
-       body: { tokenParams: {name, symbol, description, source: "clawmes"}, bypassTxHash? }
+       body: { tokenParams: {name, symbol, description, source: "clawmes"}, burnTxHash, bypassTxHash? }
 2. Clawnch returns a captcha challenge:
        { challengeId, message, nonce, contractAddress, storageSlot, deadline }
 3. Clawmes solves the challenge:
@@ -49,22 +73,26 @@ Clanker call. The user's wallet only signs the off-chain captcha.
 
 ## Requirements
 
-* `CLAWNCH_API_KEY` env var. Issued via `/register_agent` (two-step
-  signed flow against `clawn.ch/api/agents/register` +
-  `/api/agents/verify`).
+* A verified 1,000,000+ $CLAWNCH burn from the launching wallet
+  (see "Launch cost" above). Required for **every** deploy path —
+  custodial, non-custodial, and export.
+* `CLAWNCH_API_KEY` env var (custodial path only). Issued via
+  `/register_agent` (two-step signed flow against
+  `clawn.ch/api/agents/register` + `/api/agents/verify`).
 * An active wallet connected to clawmes (WC / local-key / Bankr).
   The wallet signs the captcha message; it doesn't pay deploy gas.
 * Base RPC reachable (any chain `8453` endpoint — public or paid).
 
 ## Rate limits + bypass
 
-Free deploys: 1 per 24h per agent. If hit, the deploy returns a
+Custodial deploys: 1 per 24h per agent. If hit, the deploy returns a
 `rate_limited` error with the bypass instructions.
 
-Bypass: send `>= 0.001 ETH` (current default) to the Clawnch bypass
+Bypass: send `>= 0.005 ETH` (current default) to the Clawnch bypass
 recipient on Base, then re-run with `bypass_tx_hash=<hash>` (or
 `/launch bypass <hash>` and `/launch confirm`). Single-use; must be
-< 24h old.
+< 24h old. The bypass covers the cooldown only — it does not replace
+the mandatory burn.
 
 ## Source attribution
 
@@ -87,7 +115,9 @@ the public launch detail page. Observable + intentional.
 | `/launch telegram <handle\|url>` | Telegram handle or invite URL. |
 | `/launch farcaster <handle\|url>` | Farcaster handle or Warpcast URL. |
 | `/launch discord <url>` | Discord invite URL. |
-| `/launch bypass <tx_hash>` | Optional: skip 24h cooldown. |
+| `/burn <amount>` | Sign + submit the required $CLAWNCH burn (min 1,000,000). |
+| `/launch burn <amount\|tx_hash>` | Attach the required burn to the draft (signs it if given an amount). |
+| `/launch bypass <tx_hash>` | Optional: skip 24h cooldown (custodial only; does not replace the burn). |
 | `/launch status` | Show current draft. |
 | `/launch confirm` | Deploy. |
 | `/launch cancel` | Clear draft. |
@@ -100,7 +130,7 @@ Social handles are normalized — `/launch twitter clawnchbot` becomes `https://
 
 | Action | Returns |
 |---|---|
-| `deploy` | `{txHash, tokenAddress, ...}` on success. Requires `name`, `symbol`; accepts `description`, `image`, `twitter`, `website`, `telegram`, `farcaster`, `discord`, `bypass_tx_hash`. |
+| `deploy` | `{txHash, tokenAddress, ...}` on success. Requires `name`, `symbol`, and `burn_tx_hash` (the verified 1M+ $CLAWNCH burn — deploys without it are rejected with `burn_required`); accepts `description`, `image`, `twitter`, `website`, `telegram`, `farcaster`, `discord`, `bypass_tx_hash`. |
 | `info` | Launch metadata for a deployed token. Requires `token` (address). |
 
 Each social arg is normalized the same way the slash command does — bare handles become full platform URLs, full URLs pass through. Pass `discord` and `website` as complete URLs.
@@ -114,6 +144,14 @@ Each social arg is normalized the same way the slash command does — bare handl
 
 ## Recovery + edge cases
 
+* **`burn_required`**: the deploy was attempted without a verified
+  burn. Run `/burn 1000000` (or `/launch burn 1000000`), wait for the
+  tx to confirm, then re-run `/launch confirm`. If the user already
+  burned externally, attach the hash with `/launch burn <tx_hash>`.
+* **`invalid_burn`**: the supplied hash failed verification — wrong
+  sender, wrong recipient, amount below 1M, or older than 24h. The
+  error message says which. A fresh burn from the launching wallet
+  fixes it.
 * **No wallet connected**: `/launch confirm` returns "No wallet
   connected. Run /connect first." Connect, then re-run confirm.
 * **CLAWNCH_API_KEY missing**: deploy returns `no_credentials`. Run
@@ -137,5 +175,6 @@ Each social arg is normalized the same way the slash command does — bare handl
   rules (creator = the agent's registered wallet).
 * It does not provide LP-fee claim transactions (Clanker handles
   fee accrual via FeeLocker; `clawnch_fees` reads metadata only).
-* It does not gate access on `$CLAWNCH` holdings. Anyone with an
-  API key (which is free to obtain) can use `/launch`.
+* It does not waive the launch burn. Every deploy requires the
+  verified 1M+ $CLAWNCH burn — there is no free-launch path. The
+  API key itself is free to obtain via `/register_agent`.
