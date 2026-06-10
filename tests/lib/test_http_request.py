@@ -143,3 +143,37 @@ class TestRetry:
             http_get("https://api.0x.org/quote")
         # No retry — only one attempt
         assert len(client._calls) == 1
+
+    @pytest.mark.parametrize("status", [400, 402, 404, 429])
+    def test_does_not_retry_4xx(self, monkeypatch, status):
+        """4xx is deterministic — retrying burns time + rate-limit budget.
+
+        402 especially matters: Clawnch's mandatory-burn rejection
+        (burn_required) must surface immediately, not after 3 attempts
+        and seconds of backoff.
+        """
+        import httpx
+
+        responses = [FakeResponse({"ok": False}, status_code=status)]
+        client = FakeClient(responses)
+        monkeypatch.setattr(httpx, "Client", lambda *a, **kw: client)
+
+        with pytest.raises(httpx.HTTPStatusError):
+            http_get("https://api.0x.org/quote")
+        # Single attempt — no retries on 4xx
+        assert len(client._calls) == 1
+
+    def test_retries_5xx(self, monkeypatch):
+        """Transient 5xx still gets the retry treatment."""
+        import httpx
+
+        responses = [
+            FakeResponse({"error": "upstream"}, status_code=502),
+            FakeResponse({"ok": True}),
+        ]
+        client = FakeClient(responses)
+        monkeypatch.setattr(httpx, "Client", lambda *a, **kw: client)
+
+        result = http_get("https://api.0x.org/quote")
+        assert result == {"ok": True}
+        assert len(client._calls) == 2

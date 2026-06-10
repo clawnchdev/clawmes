@@ -302,6 +302,23 @@ class TestConfirm:
         assert "0.005 ETH" in out
         assert "/launch bypass" in out
 
+    async def test_burn_required_error_renders_burn_instructions(self, fake_svc):
+        fake_svc.deploy_raise = ClawnchError(
+            "burn_required",
+            "burn first",
+            meta={
+                "minBurnTokens": "1000000",
+                "burnAddress": "0x000000000000000000000000000000000000dEaD",
+            },
+        )
+        await launch_mod.handle_launch("name MyCoin", sender_id="alice")
+        await launch_mod.handle_launch("symbol MC", sender_id="alice")
+        out = await launch_mod.handle_launch("confirm", sender_id="alice")
+        assert "1,000,000+" in out
+        assert "0x000000000000000000000000000000000000dEaD" in out
+        assert "/launch burn" in out
+        assert "/launch confirm" in out
+
     async def test_other_clawnch_error(self, fake_svc):
         fake_svc.deploy_raise = ClawnchError("api_error", "boom")
         await launch_mod.handle_launch("name MyCoin", sender_id="alice")
@@ -657,6 +674,51 @@ class TestNonCustodialConfirm:
         assert "Prepare failed (bad_request)" in out
         assert "/launch status" in out
 
+    async def test_prepare_burn_required_renders_instructions(
+        self, fake_wallet_state, fake_prepare, fake_wallet_mode
+    ):
+        fake_prepare["raise"] = ClawnchError(
+            "burn_required",
+            "This launch path now requires a verified 1,000,000 $CLAWNCH burn.",
+            meta={
+                "minBurnTokens": "1000000",
+                "burnAddress": "0x000000000000000000000000000000000000dEaD",
+            },
+        )
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("confirm", sender_id="alice")
+        assert "1,000,000+" in out
+        assert "0x000000000000000000000000000000000000dEaD" in out
+        assert "/launch burn" in out
+        # Vault upside surfaced so the burn doesn't read as a pure cost
+        assert "vault" in out.lower()
+
+    async def test_prepare_burn_required_without_meta_uses_defaults(
+        self, fake_wallet_state, fake_prepare, fake_wallet_mode
+    ):
+        fake_prepare["raise"] = ClawnchError("burn_required", "burn first")
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("confirm", sender_id="alice")
+        assert "1,000,000+" in out
+        assert "dEaD" in out
+
+    async def test_prepare_burn_required_non_numeric_min_passes_through(
+        self, fake_wallet_state, fake_prepare, fake_wallet_mode
+    ):
+        """A non-numeric minBurnTokens is surfaced verbatim, not crashed on."""
+        fake_prepare["raise"] = ClawnchError(
+            "burn_required",
+            "burn first",
+            meta={"minBurnTokens": "one million"},
+        )
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("confirm", sender_id="alice")
+        assert "one million+" in out
+        assert "dEaD" in out
+
     async def test_prepare_other_clawnch_error(
         self, fake_wallet_state, fake_prepare, fake_wallet_mode
     ):
@@ -852,6 +914,25 @@ class TestExport:
         assert "Export failed" in out
         assert "api_error" in out
 
+    async def test_burn_required_renders_instructions(
+        self, fake_wallet_optional, fake_prepare_for_export
+    ):
+        fake_wallet_optional["connected"] = True
+        fake_prepare_for_export["raise"] = ClawnchError(
+            "burn_required",
+            "burn first",
+            meta={
+                "minBurnTokens": "1000000",
+                "burnAddress": "0x000000000000000000000000000000000000dEaD",
+            },
+        )
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("export", sender_id="alice")
+        assert "Export failed" in out
+        assert "1,000,000+" in out
+        assert "/launch burn" in out
+
     async def test_prepare_unexpected_error(self, fake_wallet_optional, fake_prepare_for_export):
         fake_wallet_optional["connected"] = True
         fake_prepare_for_export["raise"] = RuntimeError("boom")
@@ -968,6 +1049,26 @@ class TestCheck:
         out = await launch_mod.handle_launch("check", sender_id="alice")
         assert "rate_limited" in out
         assert "00:00 UTC" in out
+
+    async def test_burn_required_renders_instructions(
+        self, fake_wallet_optional, fake_prepare_for_check
+    ):
+        fake_wallet_optional["connected"] = True
+        fake_prepare_for_check["raise"] = ClawnchError(
+            "burn_required",
+            "burn first",
+            meta={
+                "minBurnTokens": "1000000",
+                "burnAddress": "0x000000000000000000000000000000000000dEaD",
+            },
+        )
+        await launch_mod.handle_launch("name X", sender_id="alice")
+        await launch_mod.handle_launch("symbol X", sender_id="alice")
+        out = await launch_mod.handle_launch("check", sender_id="alice")
+        assert "params OK" in out
+        assert "no verified burn" in out
+        assert "1,000,000+" in out
+        assert "/launch burn" in out
 
     async def test_other_error(self, fake_wallet_optional, fake_prepare_for_check):
         fake_wallet_optional["connected"] = True

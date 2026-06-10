@@ -21,9 +21,9 @@ Why the API and not direct on-chain calls:
 
   * Clawnch holds the deployer wallet (custodial gas + atomicity);
     clawmes never has to manage launchpad-side keys.
-  * Rate limiting + spam controls (24h cooldown, ETH-bypass, optional
-    $CLAWNCH burn bypass) are enforced server-side; the open source
-    plugin inherits them automatically.
+  * Rate limiting + spam controls (24h cooldown, ETH-bypass, the
+    mandatory 1M $CLAWNCH launch burn) are enforced server-side; the
+    open source plugin inherits them automatically.
   * Backend migration (Clanker -> ClawnchFactory v2) preserves the
     HTTP API per ``clawncher/migration-v2.md``; clawmes stays valid
     through the swap.
@@ -68,16 +68,20 @@ class ClawnchError(RuntimeError):
         token params, HTTP 400).
       * ``no_credentials`` — API key missing or rejected (HTTP 401/403).
       * ``rate_limited`` — Clawnch's 24h cooldown or burst limit (HTTP 429).
+      * ``burn_required`` — launch attempted without the mandatory
+        1,000,000 $CLAWNCH burn (HTTP 402). ``meta`` carries the
+        upstream requirements (``minBurnTokens``, ``burnAddress``).
       * ``challenge_expired`` — captcha not solved within the 5s window
         (HTTP 408).
       * ``not_found`` — launch / agent / challenge not found (HTTP 404).
       * ``api_error`` — generic upstream failure.
     """
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, meta: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.meta: dict[str, Any] = meta or {}
 
 
 class ClawnchService(Service):
@@ -313,9 +317,14 @@ class ClawnchService(Service):
         - The user's wallet pays gas.
         - Same 20% platform fee preserved in the rewards array.
 
-        ``burn_tx_hash`` is verified server-side; if valid, the
-        corresponding vault clause gets baked into the returned
-        calldata.
+        ``burn_tx_hash`` is **mandatory upstream**: every launch
+        requires a verified 1,000,000+ $CLAWNCH burn from
+        ``from_address`` to the dead address within 24h. Calling
+        without one raises ``ClawnchError`` with
+        ``code="burn_required"`` (HTTP 402) whose ``meta`` carries
+        ``minBurnTokens`` + ``burnAddress``. A verified burn also sets
+        the vault clause baked into the returned calldata (1M = 1%,
+        up to 10M = 10%).
         """
         if not from_address:
             raise ClawnchError("bad_request", "from_address is required")
@@ -356,6 +365,13 @@ class ClawnchService(Service):
             # Map a couple of upstream codes to clawmes' classification.
             if code == "rate_limited":
                 raise ClawnchError("rate_limited", msg)
+            if code == "burn_required":
+                meta = body.get("meta")
+                raise ClawnchError(
+                    "burn_required",
+                    msg,
+                    meta=meta if isinstance(meta, dict) else {},
+                )
             if code in (
                 "invalid_from",
                 "invalid_name",
@@ -402,7 +418,7 @@ class ClawnchService(Service):
         }
 
     def get_burn_config(self) -> dict[str, Any]:
-        """Return the $CLAWNCH burn config used by ``/launch burn``.
+        """Return the $CLAWNCH burn config used by ``/burn`` + ``/launch burn``.
 
         Returns the token address (the CLAWNCH ERC-20), the burn
         address (dead address — 0x…dEaD), and the minimum burn amount
@@ -410,11 +426,15 @@ class ClawnchService(Service):
         ``transfer(burn_address, amount * 1e18)`` calldata that the
         active wallet signs.
 
+        The minimum burn is **required for every launch** (deploys
+        without a verified burn are rejected with ``burn_required``);
+        it doubles as the vault claim (1M = 1% vault, up to 10M = 10%).
+
         Stable values today (override via env for staging):
 
           * ``CLAWNCH_TOKEN_ADDRESS``    — default ``0xa1F724…747be``
           * ``CLAWNCH_BURN_ADDRESS``     — default ``0x000…dEaD``
-          * ``CLAWNCH_MIN_BURN_TOKENS``  — default ``1_000_000`` (1% vault)
+          * ``CLAWNCH_MIN_BURN_TOKENS``  — default ``1_000_000`` (launch minimum, 1% vault)
         """
         return {
             "token_address": os.environ.get(
@@ -502,6 +522,16 @@ class ClawnchService(Service):
             raise ClawnchError("rate_limited", message)
         if code_hint == "BYPASS_INVALID" or code_hint == "INSUFFICIENT_FUNDS":
             raise ClawnchError("bad_request", message)
+        if code_hint in ("burn_required", "BURN_PAYMENT_REQUIRED") or status == 402:
+            # Mandatory 1M $CLAWNCH burn missing. Carry the upstream
+            # ``meta`` block (minBurnTokens, burnAddress) so the UX can
+            # render exact burn instructions.
+            meta = body.get("meta")
+            raise ClawnchError(
+                "burn_required",
+                message,
+                meta=meta if isinstance(meta, dict) else {},
+            )
         if status == 400:
             raise ClawnchError("bad_request", message)
         if status == 401 or status == 403:

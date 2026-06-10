@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.19.0 — 2026-06-09
+
+### Changed — mandatory 1M $CLAWNCH launch burn
+
+The Clawnch launchpad now requires a verified 1,000,000+ $CLAWNCH burn for
+**every** launch — `/api/prepare/deploy` and `/api/deploy` reject no-burn
+deploys with HTTP 402 `{code: "burn_required", meta: {minBurnTokens,
+burnAddress}}`. clawmes previously treated the burn as an optional
+vault-allocation perk; a no-burn confirm surfaced as a raw
+`Client error '402 Payment Required'` after ~3 pointless retries.
+
+- `ClawnchError` gains a `meta` dict and a `burn_required` classification.
+  `_reclassify` maps HTTP 402 / `burn_required` / `BURN_PAYMENT_REQUIRED`
+  to it, carrying the upstream `meta` (min tokens + burn address); the
+  `prepare_deploy` `ok:false` map handles the same code on 2xx bodies.
+- `/launch confirm` (both paths), `/launch check`, and `/launch export`
+  render the rejection as exact burn instructions — amount, dead address,
+  the `/launch burn <amount|tx_hash>` next step, and the vault % the same
+  burn earns — instead of a generic failure. `/launch check` keeps its
+  checklist tone ("params OK, but no verified burn attached").
+- `clawnch_launch` tool: new `burn_tx_hash` schema param forwarded to
+  `deploy()` (the tool previously had no way to launch under the burn
+  requirement); `burn_required` errors include retry instructions. Bypass
+  copy corrected to the real 0.005 ETH default.
+- `lib/http`: 4xx responses are no longer retried (the module docstring
+  always promised this; the tenacity predicate retried every
+  `HTTPStatusError`). 5xx + transport errors keep the existing backoff.
+  A burn-less prepare now fails in one request instead of three.
+- Docs/help: README launch section, `clawnch-launch` skill, plugin.yaml,
+  and `/burn` + `/launch` usage text all reframe the burn as required
+  (vault is the bonus), and document `burn_required` / `invalid_burn`
+  recovery.
+
+Verified against the live API: `GET /api/prepare/deploy` without
+`burnTxHash` returns 402 `burn_required` with the documented `meta` shape.
+
 ## 0.18.2 — 2026-06-09
 
 ### Added — unified inference provider router

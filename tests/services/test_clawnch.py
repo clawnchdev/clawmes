@@ -637,6 +637,36 @@ class TestPrepareDeploy:
             svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
         assert exc_info.value.code == "rate_limited"
 
+    def test_ok_false_burn_required_carries_meta(self, svc, monkeypatch):
+        """The mandatory-burn rejection maps to burn_required with meta."""
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: {
+                "ok": False,
+                "error": "This launch path now requires a verified 1,000,000 $CLAWNCH burn.",
+                "code": "burn_required",
+                "meta": {
+                    "minBurnTokens": "1000000",
+                    "burnAddress": "0x000000000000000000000000000000000000dEaD",
+                },
+            },
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        assert exc_info.value.code == "burn_required"
+        assert exc_info.value.meta["minBurnTokens"] == "1000000"
+        assert exc_info.value.meta["burnAddress"].endswith("dEaD")
+
+    def test_ok_false_burn_required_without_meta(self, svc, monkeypatch):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: {"ok": False, "error": "burn it", "code": "burn_required"},
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X")
+        assert exc_info.value.code == "burn_required"
+        assert exc_info.value.meta == {}
+
     @pytest.mark.parametrize(
         "code",
         ["invalid_from", "invalid_name", "invalid_symbol", "missing_required", "invalid_burn"],
@@ -835,6 +865,45 @@ class TestErrorReclassify:
         with pytest.raises(ClawnchError) as exc_info:
             svc_with_key.start_deploy(token_params={"name": "x", "symbol": "X"})
         assert exc_info.value.code == "bad_request"
+
+    def test_402_burn_required_code_carries_meta(self, svc_with_key, monkeypatch):
+        """HTTP 402 burn_required maps to burn_required with the meta block."""
+        exc = _HTTPErr(
+            _FakeResponse(
+                402,
+                {
+                    "ok": False,
+                    "error": "This launch path now requires a verified 1,000,000 $CLAWNCH burn.",
+                    "code": "burn_required",
+                    "meta": {
+                        "minBurnTokens": "1000000",
+                        "burnAddress": "0x000000000000000000000000000000000000dEaD",
+                    },
+                },
+            )
+        )
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", self._trigger(svc_with_key, exc))
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.start_deploy(token_params={"name": "x", "symbol": "X"})
+        assert exc_info.value.code == "burn_required"
+        assert exc_info.value.meta["minBurnTokens"] == "1000000"
+
+    def test_burn_payment_required_legacy_code(self, svc_with_key, monkeypatch):
+        """The custodial path's BURN_PAYMENT_REQUIRED hint maps the same way."""
+        exc = _HTTPErr(_FakeResponse(402, {"error": "burn first", "code": "BURN_PAYMENT_REQUIRED"}))
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", self._trigger(svc_with_key, exc))
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.start_deploy(token_params={"name": "x", "symbol": "X"})
+        assert exc_info.value.code == "burn_required"
+        assert exc_info.value.meta == {}
+
+    def test_402_without_code_hint_to_burn_required(self, svc_with_key, monkeypatch):
+        """Bare 402 (body unparseable / code missing) still classifies."""
+        exc = _HTTPErr(_FakeResponse(402, {"error": "payment required"}))
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", self._trigger(svc_with_key, exc))
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.start_deploy(token_params={"name": "x", "symbol": "X"})
+        assert exc_info.value.code == "burn_required"
 
     def test_unclassifiable_propagates(self, svc_with_key, monkeypatch):
         """When we can't translate, the original exception is re-raised."""

@@ -27,8 +27,14 @@ class _FakeSvc:
         self.info_return: dict = {"name": "X"}
         self.info_raise: Exception | None = None
 
-    def deploy(self, *, token_params, bypass_tx_hash=None):
-        self.deploys.append({"params": token_params, "bypass": bypass_tx_hash})
+    def deploy(self, *, token_params, bypass_tx_hash=None, burn_tx_hash=None):
+        self.deploys.append(
+            {
+                "params": token_params,
+                "bypass": bypass_tx_hash,
+                "burn": burn_tx_hash,
+            }
+        )
         if self.deploy_raise:
             raise self.deploy_raise
         return self.deploy_return
@@ -193,11 +199,45 @@ class TestDeploy:
         )
         assert fake_svc.deploys[0]["bypass"] == "0xbeef"
 
+    def test_with_burn(self, fake_svc):
+        clawnch_launch(
+            {
+                "action": "deploy",
+                "name": "Foo",
+                "symbol": "FOO",
+                "burn_tx_hash": "0x" + "a" * 64,
+            }
+        )
+        assert fake_svc.deploys[0]["burn"] == "0x" + "a" * 64
+
     def test_clawnch_error_surfaces_code(self, fake_svc):
         fake_svc.deploy_raise = ClawnchError("rate_limited", "wait 24h")
         out = json.loads(clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO"}))
         assert out["isError"] is True
         assert out["details"]["error_code"] == "rate_limited"
+
+    def test_burn_required_error_includes_instructions(self, fake_svc):
+        fake_svc.deploy_raise = ClawnchError(
+            "burn_required",
+            "This launch path now requires a verified 1,000,000 $CLAWNCH burn.",
+            meta={
+                "minBurnTokens": "1000000",
+                "burnAddress": "0x000000000000000000000000000000000000dEaD",
+            },
+        )
+        out = json.loads(clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "burn_required"
+        text = out["content"][0]["text"]
+        assert "1000000" in text
+        assert "0x000000000000000000000000000000000000dEaD" in text
+        assert "burn_tx_hash" in text
+
+    def test_burn_required_error_without_meta_uses_defaults(self, fake_svc):
+        fake_svc.deploy_raise = ClawnchError("burn_required", "burn first")
+        out = json.loads(clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO"}))
+        assert out["details"]["error_code"] == "burn_required"
+        assert "dEaD" in out["content"][0]["text"]
 
     def test_unexpected_error(self, fake_svc):
         fake_svc.deploy_raise = RuntimeError("boom")

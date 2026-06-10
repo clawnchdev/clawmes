@@ -151,7 +151,9 @@ Clawmes wires the following partner / ecosystem projects directly into the tool 
 
 ## Launch a token from chat
 
-Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token from a chat message. As of v0.4.0, the default is **non-custodial** — your wallet signs the deploy tx directly, no API key needed:
+Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token from a chat message. As of v0.4.0, the default is **non-custodial** — your wallet signs the deploy tx directly, no API key needed.
+
+**Every launch requires a verified burn of ≥1,000,000 $CLAWNCH** from the launching wallet to the dead address (within 24h of the deploy). Deploys without one are rejected with `burn_required`. The same burn claims the Clanker vault allocation (1M = 1%, up to 10M = 10%), so the minimum is never wasted.
 
 ```
 /connect_local                               # or /connect (WalletConnect) / /connect_bankr
@@ -165,6 +167,7 @@ Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token fr
 /launch telegram mycoinchat                  # optional
 /launch farcaster mycoin                     # optional
 /launch discord https://discord.gg/abc       # optional
+/launch burn 1000000                         # required — signs + submits the 1M CLAWNCH burn
 /launch confirm
 # clawmes calls https://www.clawn.ch/api/prepare/deploy for unsigned
 # Clanker factory calldata, then your wallet signs and submits.
@@ -174,20 +177,19 @@ Clawmes wires the Clawnch launchpad end-to-end so any user can deploy a token fr
 
 Social handles get normalized (`mycoin` → `https://x.com/mycoin`); full URLs pass through unchanged. They're persisted to `tokenParams.metadata.socialMediaUrls` on the launchpad side and may render as badges on the launch detail page.
 
-To claim a vault allocation, burn $CLAWNCH before confirming:
+The burn can also be done standalone — any time before the launch (within 24h):
 
 ```
-/burn 1000000                   # standalone burn: signs + submits 1M CLAWNCH = 1% vault
+/burn 1000000                   # standalone burn: required minimum; grants 1% vault
 /burn 10000000                  # max 10M CLAWNCH = 10% vault (Clanker maximum)
 /burn last                      # show the last burn tx hash you signed via clawmes
 
-# Or via the legacy /launch burn path (same outcome):
-/launch burn 1000000            # signs + submits a 1M CLAWNCH burn from the active wallet
-/launch burn 0x<tx_hash>        # or paste a tx hash if you burned externally
-/launch confirm                 # deploy with vault allocation applied
+# Then attach it to the draft:
+/launch burn 0x<tx_hash>        # paste the hash (also works for external burns)
+/launch confirm                 # deploy with the burn verified + vault applied
 ```
 
-Curve: 1k tokens allocated per 1 CLAWNCH burned (1M → 1%, 10M → 10%). Vault tokens are subject to the Clanker 7-day lockup. See [`api/lib/burn.ts`](https://github.com/clawnchdev/clawnch/blob/main/api/lib/burn.ts) for the exact verification rules. Server-side verification happens on every deploy — passing `tokenParams.vault.percentage` without a verified `burnTxHash` is rejected with `VAULT_REQUIRES_BURN`.
+Curve: 1k tokens allocated per 1 CLAWNCH burned (1M → 1%, 10M → 10%). Vault tokens are subject to the Clanker 7-day lockup. See [`api/lib/burn.ts`](https://github.com/clawnchdev/clawnch/blob/main/api/lib/burn.ts) for the exact verification rules (sender = launching wallet, recipient = dead address, ≥1M, <24h old). Confirming without a verified burn returns `burn_required` with the exact requirements; an invalid hash returns `invalid_burn`.
 
 ### Custodial deploys (legacy path)
 
@@ -198,13 +200,13 @@ For users who can't pay deploy gas themselves, or who want server-paid gas with 
 # clawmes posts a challenge, your wallet signs, clawn.ch returns an apiKey.
 # Save it as CLAWNCH_API_KEY in ~/.hermes/.env.
 
-/launch ... (same drafting steps)
+/launch ... (same drafting steps, including /launch burn — the 1M burn is required here too)
 /launch confirm --custodial
 # Clawnch's deployer wallet submits the Clanker tx server-side;
 # your wallet only signs the captcha. Subject to the 24h cooldown.
 ```
 
-Bypass the cooldown by sending `0.005 ETH` to the Clawnch bypass recipient on Base, then `/launch bypass <tx_hash>` + `/launch confirm --custodial`.
+Bypass the cooldown by sending `0.005 ETH` to the Clawnch bypass recipient on Base, then `/launch bypass <tx_hash>` + `/launch confirm --custodial`. The bypass covers the cooldown only — it does not replace the mandatory burn.
 
 ### Export-only mode (for Base MCP, Claude Desktop, Cursor, ChatGPT)
 
@@ -213,6 +215,7 @@ clawmes can also emit the unsigned calldata for you to paste into another agent 
 ```
 /launch name MyCoin
 /launch symbol MC
+/launch burn 0x<tx_hash>        # the export path needs the verified burn too
 /launch export
 # Prints a JSON {chain: "base", calls: [{to, data, value}]} block
 # ready to paste into Base MCP's send_calls.
