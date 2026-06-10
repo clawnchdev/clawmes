@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.18.2 — 2026-06-09
+
+### Added — unified inference provider router
+
+`clawmes/lib/inference.py` — a single `chat_completion()` entry point that
+selects the OpenAI-compatible backend at call time, so tools no longer hardcode
+one provider:
+
+- Selection: `CLAWMES_LLM_PROVIDER` (`venice` | `opengateway`); when unset, auto
+  — Venice if `VENICE_API_KEY` is set, else OpenGateway.
+- Provider-specific errors (`VeniceError` / `OpenGatewayError`) are normalized to
+  a single `InferenceError` (carries `.code` + `.provider`).
+- The two existing inference call sites now route through it: the `/research`
+  narrative summary and the `/agent --ai` intent extractor (and therefore
+  `clawmes_info op=research`). With Venice configured, those run on Venice.
+
 ## 0.18.1 — 2026-06-09
 
 ### Fixed — Venice: distinguish "out of credits" from "bad auth"

@@ -304,14 +304,15 @@ def _safe_float(v: Any) -> float | None:
 
 
 def _llm_synthesize(report: dict[str, Any]) -> str:
-    """Optional narrative summary via OpenGateway. Empty on any failure.
+    """Optional narrative summary via the configured inference provider
+    (Venice / OpenGateway — see clawmes.lib.inference). Empty on any failure.
 
     Strictly capped to 4 sentences in the prompt — we want a synthesis,
     not a sales pitch. Failures fall back to the structured report
     above without any visible error.
     """
     try:
-        from clawmes.services.opengateway import get_opengateway_service
+        from clawmes.lib.inference import chat_completion
     except Exception:  # noqa: BLE001
         return ""
 
@@ -323,8 +324,7 @@ def _llm_synthesize(report: dict[str, Any]) -> str:
     )
     user = json.dumps(report)
     try:
-        svc = get_opengateway_service()
-        resp = svc.chat_completion(
+        resp = chat_completion(
             [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},

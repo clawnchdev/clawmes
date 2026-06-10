@@ -135,14 +135,14 @@ class TestLlmExtract:
         assert still == ["x"]
 
     def test_import_failure_returns_failed(self, monkeypatch):
-        """If the OpenGateway module can't be imported at all, return originals."""
+        """If the inference router can't be imported at all, return originals."""
         import builtins
 
         original_import = builtins.__import__
 
         def _block(name, *args, **kw):
-            if name == "clawmes.services.opengateway":
-                raise ImportError("no opengateway")
+            if name == "clawmes.lib.inference":
+                raise ImportError("no inference")
             return original_import(name, *args, **kw)
 
         monkeypatch.setattr(builtins, "__import__", _block)

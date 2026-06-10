@@ -569,6 +569,10 @@ OPENGATEWAY_MODEL=    # optional default model id sent when callers omit model=
 VENICE_API_KEY=       # required — Venice answers unauthenticated calls with HTTP 402 (x402)
 VENICE_MODEL=         # optional default model id (catalog: GET https://api.venice.ai/api/v1/models)
 
+# Inference provider selection for clawmes' own tools (research summary, /agent --ai).
+# venice | opengateway. If unset: Venice when VENICE_API_KEY is present, else OpenGateway.
+CLAWMES_LLM_PROVIDER=
+
 # Market data + analytics
 COINGECKO_API_KEY=
 HERD_ACCESS_TOKEN=

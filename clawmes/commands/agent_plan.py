@@ -224,10 +224,7 @@ def _llm_extract(
     state through a fabricated arg shape.
     """
     try:
-        from clawmes.services.opengateway import (
-            OpenGatewayError,
-            get_opengateway_service,
-        )
+        from clawmes.lib.inference import InferenceError, chat_completion
     except Exception:  # noqa: BLE001
         return [], failed_segments
 
@@ -253,12 +250,11 @@ def _llm_extract(
         "Output exactly one line. No JSON. No commentary. No quotes."
     )
 
-    svc = get_opengateway_service()
     extra: list[dict[str, Any]] = []
     still_failed: list[str] = []
     for segment in failed_segments:
         try:
-            resp = svc.chat_completion(
+            resp = chat_completion(
                 [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": segment},
@@ -266,7 +262,7 @@ def _llm_extract(
                 temperature=0.0,
                 max_tokens=80,
             )
-        except OpenGatewayError:
+        except InferenceError:
             still_failed.append(segment)
             continue
         except Exception:  # noqa: BLE001
