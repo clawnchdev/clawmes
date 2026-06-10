@@ -1455,15 +1455,15 @@ class TestBuildReport:
 
 
 class TestLlmSynthesize:
-    def test_no_opengateway_returns_empty(self, monkeypatch):
-        # Force ImportError on opengateway.
+    def test_no_inference_router_returns_empty(self, monkeypatch):
+        # Force ImportError on the inference router.
         import builtins
 
         original_import = builtins.__import__
 
         def _block(name, *args, **kw):
-            if name == "clawmes.services.opengateway":
-                raise ImportError("no opengateway")
+            if name == "clawmes.lib.inference":
+                raise ImportError("no inference")
             return original_import(name, *args, **kw)
 
         monkeypatch.setattr(builtins, "__import__", _block)
