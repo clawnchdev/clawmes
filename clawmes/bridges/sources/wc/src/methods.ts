@@ -38,6 +38,27 @@ const DEFAULT_NAMESPACES = {
   },
 };
 
+// Optional namespaces are advertised at pairing but not required: wallets
+// that don't implement them (most) still pair cleanly, while MetaMask smart
+// accounts expose `wallet_requestExecutionPermissions` (ERC-7715). Kept
+// separate from DEFAULT_NAMESPACES so a missing method never blocks pairing.
+const OPTIONAL_NAMESPACES = {
+  eip155: {
+    methods: ["wallet_requestExecutionPermissions", "wallet_getCapabilities"],
+    chains: [
+      "eip155:1",
+      "eip155:8453",
+      "eip155:42161",
+      "eip155:10",
+      "eip155:137",
+      "eip155:59144",
+      "eip155:11155111",
+      "eip155:84532",
+    ],
+    events: [],
+  },
+};
+
 
 // --- pair ----------------------------------------------------------------
 
@@ -46,6 +67,7 @@ export async function pair(_params: unknown): Promise<{ uri: string; topic: stri
   const client = await safeGetClient("pair");
   const { uri, approval } = await client.connect({
     requiredNamespaces: DEFAULT_NAMESPACES,
+    optionalNamespaces: OPTIONAL_NAMESPACES,
   });
 
   if (!uri) {

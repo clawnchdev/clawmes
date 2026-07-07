@@ -10,7 +10,10 @@ Two decorators:
          - ``confirm`` returns a ``POLICY HOLD`` instruction to the LLM
            with a one-time nonce; the LLM relays to the user, gets approval,
            and retries with the nonce in ``policyConfirmationNonce``.
-      3. Delegation execution (EIP-7710) — TODO; tracked in PRD §6.7.
+      3. Delegation execution (EIP-7710) — if a signed on-chain delegation
+         covers the action, redeem it (agent-signed) and skip the handler.
+         Fails CLOSED if redemption is refused (caveat violation / revoked);
+         falls through only when delegation is not applicable.
       4. Original handler execution.
       5. Usage counter + ledger record on success.
 
@@ -21,9 +24,6 @@ Two decorators:
 The set of write tools is implicit — ``WRITE_TOOL_NAMES`` is populated as
 ``@write_tool`` decorators are evaluated at import time. There is no second
 source of truth, so additions can never drift.
-
-Stage 3 (delegation) remains a TODO at this milestone; everything else
-is live.
 """
 
 from __future__ import annotations
@@ -107,7 +107,15 @@ def write_tool(
                         code="policy_hold",
                     )
 
-            # Stage 3: delegation attempt — TODO when SA bridge lands
+            # Stage 3: on-chain delegation (EIP-7710). If a signed
+            # delegation covers this action, redeem it instead of running
+            # the tool's own send path. Import lazily so the delegation
+            # stack (and its eth-abi/eth-account deps) never touches tool
+            # import time, and so tools stay usable if it's unavailable.
+            delegation_outcome = _try_delegation(action_ctx, args)
+            if delegation_outcome is not None:
+                _record_invocation(action_ctx)
+                return delegation_outcome
 
             # Stage 4: actual handler
             try:
@@ -135,6 +143,61 @@ def write_tool(
         return gated
 
     return decorator
+
+
+def _try_delegation(action_ctx: ActionContext, args: dict[str, Any]) -> str | None:
+    """Stage 3: attempt on-chain delegation redemption.
+
+    Returns a tool-result JSON string when the outcome is terminal:
+
+      * redemption succeeded → success result with the tx hash (handler is
+        skipped);
+      * redemption was attempted and refused (caveat violation, revoked,
+        expired, rate-limited, RPC failure) → error result. We fail **closed**
+        rather than silently running the tool's own send path, which would
+        bypass the on-chain limit the user signed.
+
+    Returns ``None`` when delegation is simply not applicable (no matching
+    delegation, unsupported tool, EOA delegator, unparseable args), so the
+    gate falls through to the normal handler.
+
+    Any unexpected error inside the delegation stack is swallowed and treated
+    as "not applicable" — delegation must never break a working tool.
+    """
+    try:
+        from clawmes.delegation.executor import try_delegation_execution
+    except Exception:  # noqa: BLE001 — delegation optional; never block tools
+        return None
+
+    try:
+        outcome = try_delegation_execution(action_ctx, args or {})
+    except Exception as exc:  # noqa: BLE001 — defensive: fall through to handler
+        from clawmes.lib.logger import logger_for
+
+        logger_for("tools.registry").warning("delegation stage errored: %s", exc)
+        return None
+
+    if outcome.executed:
+        from clawmes.lib.tool_result import json_result
+
+        return json_result(
+            {
+                "delegated": True,
+                "tx_hash": outcome.tx_hash,
+                "chain_id": outcome.chain_id,
+            },
+            summary=(
+                f"Executed via on-chain delegation (EIP-7710).\n"
+                f"  Tx:    {outcome.tx_hash}\n"
+                f"  Chain: {outcome.chain_id}"
+            ),
+        )
+    if outcome.error:
+        return error_result(
+            f"On-chain delegation refused this action: {outcome.error}",
+            code="delegation_refused",
+        )
+    return None
 
 
 def _extract_chain_id(args: dict[str, Any] | None) -> int | None:

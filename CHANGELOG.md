@@ -6,6 +6,74 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.20.0 — 2026-07-06
+
+### Added — EIP-7710 / EIP-7715 on-chain delegation
+
+clawmes can now compile a user's spending policy into a cryptographically
+enforced **on-chain delegation** (MetaMask Delegation Framework v1.3.0), so the
+agent executes transactions autonomously but only within limits checked by
+on-chain *caveat enforcer* contracts — not merely by the app-layer policy gate.
+This lands the delegation work that was stubbed as stage 3 of the `@write_tool`
+gate (PRD §16.2) and the `/delegate` command family (PRD §9.11).
+
+Implemented in **pure Python** (`eth-account` + `eth-abi`) — no Node/SDK
+subprocess. The ABI encoders and EIP-712 signatures are verified byte-for-byte
+against viem 2.x (the reference openclawnch stack) in `tests/delegation/`.
+
+- `clawmes/delegation/` — new package:
+  - `types.py` — Delegation Framework contract addresses (CREATE2-deterministic
+    across chains), supported-chain set, EIP-712 domain/types (the `Caveat`
+    typehash excludes `args`, matching the on-chain `DELEGATION_TYPEHASH`),
+    `ROOT_AUTHORITY` (`0xff…ff`), and the delegation dataclasses.
+  - `encoding.py` — caveat-terms encoders per enforcer, the ERC-7579 execution
+    (`encodePacked`), the permission context (`abi.encode(Delegation[])`,
+    reversed leaf-first for chains), EIP-712 typed-data, and full calldata for
+    `redeemDelegations` / `disableDelegation` / `getDelegationHash` /
+    `disabledDelegations`. ERC-20 enforcer terms use the packed 52-byte layout.
+  - `compiler.py` — `DelegationSpec` (richer than a `Policy`: per-call caps,
+    period budgets, ERC-20 caps, call limits, target allowlists, absolute
+    expiry) → caveats; `spec_from_policy` seeds a spec from a named policy
+    (`max_amount_wei` → per-call `ValueLteEnforcer`). Refuses to build an
+    unrestricted delegation unless explicitly opted in.
+  - `store.py` — one JSON file per signed delegation under
+    `${HERMES_HOME}/clawmes/delegations/`, atomic writes (0600), corruption
+    quarantine.
+  - `agent_key.py` — the agent's own **delegate** key (separate from the user
+    wallet): raw secp256k1 key encrypted with scrypt + AES-256-GCM, OS keyring
+    as a defense-in-depth layer, `CLAWMES_AGENT_PASSPHRASE` for unlock.
+  - `service.py` — lifecycle: prepare → sign (delegator wallet, EIP-712) →
+    store (+ on-chain hash) → redeem (agent-signed, `eth_call` simulation with
+    decoded revert selectors first) → revoke (`disableDelegation`) → status;
+    the `wallet_requestExecutionPermissions` (ERC-7715) request builder; and
+    an EIP-7702 upgrade path for local-key EOAs.
+  - `executor.py` — action extractors (native/ERC-20 `transfer`, `approvals`
+    revoke, `nft` transfer), delegation matching, gates (kill switch, scope,
+    chain, expiry, EOA-delegator check, redemption rate limit) and
+    `try_delegation_execution`.
+- `@write_tool` gate **stage 3** is now live (`clawmes/tools/registry.py`): if a
+  signed delegation covers the action it is redeemed on-chain and the handler
+  is skipped; the gate **fails closed** if redemption is refused (caveat
+  violation / revoked / expired) rather than silently running the tool's own
+  send path. Delegation errors never break a working tool (lazy import,
+  defensive fallthrough).
+- Commands: `/delegate [create|revoke|revoke-all|status|chains|agent|upgrade|permissions]`,
+  plus `/delegations` and `/revoke <id>` aliases.
+- `RpcService`: `get_code` (EOA-vs-smart-account detection) and
+  `CLAWMES_RPC_<id>` discovery for extra chains (Linea, Sepolia, Base Sepolia)
+  the framework supports but ships no default RPC for.
+- WalletConnect: `wallet_requestExecutionPermissions` added as an *optional*
+  namespace at pairing (won't block wallets that don't implement it), and
+  `WalletConnectMode.request_execution_permissions` forwards ERC-7715 requests.
+
+Env: `CLAWMES_AGENT_PASSPHRASE` (agent-key unlock), `CLAWMES_DELEGATION_DISABLED`
+(kill switch), `CLAWMES_MAX_FEE_WEI` / `CLAWMES_PRIORITY_FEE_WEI` (redeem gas).
+
+Note: this supersedes the planned `clawmes-sa-bridge` Node subprocess for the
+EIP-7710 path — the pure-Python implementation removes the Node dependency and
+keeps private keys in-process. `bridges/sa_client.py` remains for any future
+SDK-only surface.
+
 ## 0.19.0 — 2026-06-09
 
 ### Changed — mandatory 1M $CLAWNCH launch burn

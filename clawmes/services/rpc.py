@@ -141,6 +141,17 @@ class RpcService(Service):
         result = self._call(chain_id, "eth_getBalance", [address, "latest"])
         return int(result, 16) if isinstance(result, str) else int(result)
 
+    def get_code(self, address: str, chain_id: int, *, block: str = "latest") -> str:
+        """Return the deployed bytecode at ``address`` (``"0x"`` for an EOA).
+
+        Used by the delegation executor to distinguish a plain EOA (which
+        cannot be a delegator — ``redeemDelegations`` calls
+        ``executeFromExecutor`` on it) from a smart account / EIP-7702-
+        upgraded account.
+        """
+        result = self._call(chain_id, "eth_getCode", [address, block])
+        return str(result) if result is not None else "0x"
+
     def eth_call(
         self,
         *,
@@ -302,6 +313,19 @@ class RpcService(Service):
                 out[chain_id] = _Endpoint(chain_id=chain_id, url=override, is_default=False)
             else:
                 out[chain_id] = _Endpoint(chain_id=chain_id, url=default, is_default=True)
+
+        # Any additional chain the user configures via CLAWMES_RPC_<id> — e.g.
+        # Linea (59144) or a testnet (Sepolia 11155111, Base Sepolia 84532)
+        # the delegation framework supports but we ship no default for.
+        for key, value in os.environ.items():
+            if not key.startswith("CLAWMES_RPC_") or not value:
+                continue
+            suffix = key[len("CLAWMES_RPC_") :]
+            if not suffix.isdigit():
+                continue
+            cid = int(suffix)
+            if cid not in out:
+                out[cid] = _Endpoint(chain_id=cid, url=value, is_default=False)
         return out
 
     def is_default_endpoint(self, chain_id: int) -> bool:

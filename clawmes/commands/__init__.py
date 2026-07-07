@@ -26,6 +26,7 @@ from clawmes.commands import (
     claim,
     copy,
     dca,
+    delegation,
     discovery,
     doctor,
     evolve,
@@ -68,6 +69,7 @@ def register_all(ctx) -> None:
     wallet_recovery.register(ctx)
     policy.register(ctx)
     tx.register(ctx)
+    delegation.register(ctx)
     plans.register(ctx)
     doctor.register(ctx)
     discovery.register(ctx)
@@ -101,6 +103,6 @@ def register_all(ctx) -> None:
     mev_protect.register(ctx)
     scan.register(ctx)
     airdrop.register(ctx)
-    # TODO(v0.1.0+): model, topup, bankr, delegation, webhook,
+    # TODO(v0.1.0+): model, topup, bankr, webhook,
     # api_keys, usage, update, reports, interrupts, profile, upgrades,
     # forum, fiat, agents, skills (now /skills), channel

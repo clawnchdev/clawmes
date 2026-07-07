@@ -148,6 +148,23 @@ class WalletConnectMode(WalletMode):
             params=[msg_hex, addr],
         )
 
+    def request_execution_permissions(self, params: list[Any]) -> Any:
+        """Request ERC-7715 permissions from the wallet (MetaMask smart accounts).
+
+        Forwards ``wallet_requestExecutionPermissions`` to the user's wallet
+        via the bridge. The method is advertised as an *optional* namespace at
+        pairing, so wallets that don't implement it simply reject the request
+        rather than failing the whole session. Returns the wallet's granted-
+        permissions payload (opaque; passed through to the caller).
+        """
+        if self._client is None or self._active_topic is None:
+            raise RuntimeError("no active WalletConnect session — call connect() first")
+        return self._client.request_signature(
+            method="wallet_requestExecutionPermissions",
+            params=params,
+            metadata={"chain_id": self._state.chain_id},
+        )
+
     def switch_chain(self, chain_id: int) -> WalletState:
         """Request the user's wallet switch chains via the bridge.
 

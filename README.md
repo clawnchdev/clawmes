@@ -68,13 +68,14 @@ Releases publish to PyPI automatically via [Trusted Publishing](https://docs.pyp
 
 ## Commands
 
-97 slash commands across 16 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
+100 slash commands across 17 categories. Commands run synchronously without invoking the LLM, so they're cheap and predictable.
 
 | Category | Commands |
 |---|---|
 | **Wallet** (9) | `/wallet` `/connect` `/connect_local` `/connect_bankr` `/connect_base` `/disconnect` `/mode` `/chain` `/address` |
 | **Wallet recovery** (4) | `/create_wallet` `/recover` `/export_wallet` `/wallet_backup` |
 | **Policy & safety** (5) | `/policy` `/policy_clear` `/safemode` `/dangermode` `/audit` |
+| **Delegation (EIP-7710/7715)** (3) | `/delegate` (`create` `revoke` `revoke-all` `status` `chains` `agent` `upgrade` `permissions`) `/delegations` `/revoke` — compile a policy into an on-chain delegation the agent redeems within cryptographically-enforced caveats |
 | **Transactions** (4) | `/tx` `/tx_search` `/tx_export` `/pending` |
 | **Plans & triggers** (10) | `/plans` `/plan` `/plan_logs` `/interrupt_plan` `/pause_plan` `/resume_plan` `/triggers` `/watch` `/unwatch` `/cron` |
 | **Onboarding** (19) | `/welcome`, 5 personas (`/professional` `/degen` `/chill` `/technical` `/mentor`), 10 capability toggles (`/cap_wallet` `/cap_prices` `/cap_portfolio` `/cap_trading` `/cap_liquidity` `/cap_launchpad` `/cap_bridge` `/cap_routing` `/cap_clawnx` `/cap_hummingbot`), `/skip` `/back` `/reonboard` |
@@ -120,6 +121,21 @@ Spending policies set in natural language:
 ```
 
 For programmatic policy management (the LLM can propose, you confirm), use the `policy_manage` tool — propose→confirm flow with `confirm_store` enforcement, plus list/get/disable/enable/delete/evaluate(dry-run)/usage/categories actions.
+
+### On-chain delegation (EIP-7710 / EIP-7715)
+
+Policies above are enforced by the app before a tx is sent. For **tamper-proof, on-chain** enforcement — so the agent can act autonomously but *cannot* exceed limits even if its logic is compromised — compile a policy into a delegation:
+
+```
+/delegate create my-policy --expiry 7d
+/delegate create --per-call 0.1 --cap 1 --period daily --targets 0xRouter…
+```
+
+Two keys are involved: your wallet is the **delegator** (holds the funds, signs the delegation once via EIP-712); a locally-generated **agent key** is the **delegate** (redeems on-chain and pays gas). Limits become on-chain *caveats* — per-call value caps (`ValueLteEnforcer`), period spend budgets (`NativeToken`/`ERC20PeriodTransferEnforcer`), call limits (`LimitedCallsEnforcer`), target allowlists (`AllowedTargetsEnforcer`), absolute expiry (`TimestampEnforcer`) — checked by the MetaMask Delegation Framework's `redeemDelegations` on every action.
+
+Once a delegation covers a write tool, stage 3 of the write gate redeems it automatically and **skips** the tool's own send path; if a caveat refuses the action the gate fails closed. On-chain enforcement requires the delegator to be a smart account — a local-key EOA can be upgraded in place with `/delegate upgrade` (EIP-7702). `/delegations` lists them, `/revoke <id>` disables one on-chain. MetaMask smart-account users can instead request ERC-7715 permissions with `/delegate permissions <policy>`.
+
+Supported on Ethereum, Base (default), Arbitrum, Optimism, Polygon, Linea, and the Sepolia / Base Sepolia testnets (set `CLAWMES_RPC_<chainId>` for chains without a bundled default RPC). Implemented in pure Python — no Node subprocess — with ABI/EIP-712 output verified byte-for-byte against viem.
 
 ## Automation
 
@@ -481,7 +497,7 @@ Every clawmes-initiated transaction on Base mainnet automatically appends Coinba
 ## Security
 
 - WalletConnect mode: clawmes never holds unencrypted private keys.
-- Every write tool gates through readonly check + policy evaluation + delegation execution + ledger record.
+- Every write tool gates through readonly check + policy evaluation + on-chain delegation (EIP-7710, redeemed within signed caveats; fails closed on refusal) + ledger record.
 - Credential leak detection on every LLM-bound output.
 - Prompt-injection-resistance guardrails in SOUL.md.
 - Sequential write execution — never queues multiple txs.

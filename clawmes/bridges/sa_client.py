@@ -1,13 +1,20 @@
 """Python client for ``clawmes-sa-bridge`` (MetaMask Smart Accounts).
 
-Typed wrappers for EIP-7702 / 7710 delegation work and Permit2 signing.
+Typed wrappers for a Node subprocess wrapping ``@metamask/smart-accounts-kit``.
+
+.. note::
+   As of v0.20.0 the EIP-7710 / EIP-7715 delegation stack is implemented in
+   **pure Python** (:mod:`clawmes.delegation`) — no Node subprocess — and that
+   is what wires ``@write_tool`` stage 3 and the ``/delegate`` commands. This
+   client remains as a typed seam for any future SDK-only surface (e.g. account
+   abstraction bundler flows) but is not on the delegation redemption path.
+
 Methods (see PRD §21.3):
 
   * :meth:`delegation_create`
   * :meth:`delegation_list`
   * :meth:`delegation_revoke`
-  * :meth:`delegation_execute` — used by the ``@write_tool`` gating
-    pipeline as stage 3 (skip handler if delegation handles it)
+  * :meth:`delegation_execute`
   * :meth:`account_deploy`
   * :meth:`permit2_sign`
   * :meth:`health`
