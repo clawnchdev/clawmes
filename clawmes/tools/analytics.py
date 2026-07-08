@@ -127,9 +127,11 @@ def analytics(args: dict[str, Any], **kwargs: Any) -> str:
     days = read_int(args, "days") or _DEFAULT_DAYS
     period = read_int(args, "period")
 
-    prices = _fetch_prices(token, days)
-    if isinstance(prices, str):
-        return prices
+    data = _fetch_prices(token, days)
+    if isinstance(data, str):
+        return data
+
+    prices = data["prices"]
 
     if action == "rsi":
         return _handle_rsi(token, prices, period or 14, days)
@@ -137,11 +139,18 @@ def analytics(args: dict[str, Any], **kwargs: Any) -> str:
         return _handle_macd(token, prices, days)
     if action == "bollinger":
         return _handle_bollinger(token, prices, period or 20, days)
-    return _handle_volume(token, prices, days, args)
+    return _handle_volume(token, data["volumes"], days)
 
 
 def _fetch_prices(token: str, days: int):
-    """Returns price-only array on success or an error_result string."""
+    """Returns {"prices": [...], "volumes": [...], "market_caps": [...]} on success,
+    or an error_result string on failure.
+
+    Volumes and market_caps are the RAW arrays from the CG response
+    (list of [timestamp_ms, value] pairs). The per-action handlers
+    do their own extraction and validation so error codes stay
+    identical to current behavior.
+    """
     from clawmes.services.coingecko import get_coingecko_service
 
     try:
@@ -157,8 +166,11 @@ def _fetch_prices(token: str, days: int):
             f"No price history for {token!r}. Is the token ID correct?",
             code="not_found",
         )
-    # Each entry is [timestamp_ms, price]; we only need the price series
-    return [float(p[1]) for p in raw_prices if len(p) >= 2]
+    return {
+        "prices": [float(p[1]) for p in raw_prices if len(p) >= 2],
+        "volumes": chart.get("total_volumes") or [],
+        "market_caps": chart.get("market_caps") or [],
+    }
 
 
 def _handle_rsi(token: str, prices: list[float], period: int, days: int) -> str:
@@ -243,20 +255,7 @@ def _handle_bollinger(token: str, prices: list[float], period: int, days: int) -
     )
 
 
-def _handle_volume(token: str, prices: list[float], days: int, args) -> str:
-    """Volume action also fetches the same market-chart data and looks
-    at the volume series. The fetch is duplicated for now — a smarter
-    impl would return all three series from _fetch_prices."""
-    from clawmes.services.coingecko import get_coingecko_service
-
-    try:
-        chart = get_coingecko_service().get_market_chart(token, vs_currency="usd", days=days)
-    except Exception as exc:  # noqa: BLE001
-        return error_result(
-            f"Could not fetch volume data for {token!r}: {exc}",
-            code="api_error",
-        )
-    raw_volumes = chart.get("total_volumes") or []
+def _handle_volume(token: str, raw_volumes: list, days: int) -> str:
     if not raw_volumes:
         return error_result(
             f"No volume history for {token!r}.",
@@ -289,7 +288,6 @@ def _handle_volume(token: str, prices: list[float], days: int, args) -> str:
             f"  Ratio:     {relative:.2f}x ({classification})"
         ),
     )
-
 
 # --- math helpers ---------------------------------------------------------
 

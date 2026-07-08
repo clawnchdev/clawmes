@@ -156,11 +156,10 @@ class TestVolume:
         assert out["isError"] is True
         assert out["details"]["error_code"] == "not_found"
 
-    def test_volume_api_error(self, monkeypatch, fake_cg):
-        # First fetch (in _fetch_prices) succeeds, second (in volume
-        # handler) fails. Use side_effect with a list.
-        chart_ok = fake_cg.get_market_chart.return_value
-        fake_cg.get_market_chart.side_effect = [chart_ok, RuntimeError("boom")]
+    def test_volume_api_error_becomes_market_error(self, fake_cg):
+        """After refactor, CG failure affects all actions equally - the
+        volume path inherits _fetch_prices error handling."""
+        fake_cg.get_market_chart.side_effect = RuntimeError("boom")
         out = json.loads(analytics({"action": "volume", "token": "ETH"}))
         assert out["isError"] is True
         assert out["details"]["error_code"] == "api_error"
