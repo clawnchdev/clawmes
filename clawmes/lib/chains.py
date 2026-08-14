@@ -103,6 +103,24 @@ CHAINS: dict[int, Chain] = {
         block_explorer_url="https://blastscan.io",
         is_l2=True,
     ),
+    4663: Chain(
+        chain_id=4663,
+        name="Robinhood Chain",
+        short_name="robinhood",
+        native_symbol="ETH",
+        native_decimals=18,
+        block_explorer_url="https://robinhoodchain.blockscout.com",
+        is_l2=True,
+    ),
+    46630: Chain(
+        chain_id=46630,
+        name="Robinhood Chain Testnet",
+        short_name="robinhood-testnet",
+        native_symbol="ETH",
+        native_decimals=18,
+        block_explorer_url="https://robinhoodchain-testnet.blockscout.com",
+        is_l2=True,
+    ),
 }
 
 

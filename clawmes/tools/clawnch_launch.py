@@ -151,14 +151,17 @@ _SCHEMA: dict[str, Any] = {
     name="clawnch_launch",
     toolset="clawmes-defi",
     description=(
-        "Deploy a token on Base via the Clawnch launchpad. Clawnch "
-        "handles the deploy + initial liquidity atomically via the "
-        "Clanker SDK; the user's wallet signs a captcha challenge to "
-        "prove identity. Every deploy requires burn_tx_hash — a "
-        "verified 1,000,000+ $CLAWNCH burn (use /burn to submit one). "
-        "Supports image + social metadata (twitter / website / "
-        "telegram / farcaster / discord). Requires CLAWNCH_API_KEY "
-        "(register an agent with /register_agent)."
+        "Deploy a token via the Clawnch launchpad. Defaults to Base "
+        "(via Clanker); use --chain robinhood to launch on Robinhood "
+        "Chain via Bags.fm. Clawnch handles the deploy + initial "
+        "liquidity atomically; the user's wallet signs a captcha "
+        "challenge to prove identity (custodial) or signs the deploy tx "
+        "directly (non-custodial). Every deploy on Base requires a "
+        "verified 1,000,000+ $CLAWNCH burn (use /burn to submit one); "
+        "the Robinhood path currently doesn't enforce a burn. Supports "
+        "image + social metadata (twitter / website / telegram / "
+        "farcaster / discord). Requires CLAWNCH_API_KEY (register an "
+        "agent with /register_agent)."
     ),
     schema=_SCHEMA,
     emoji="\U0001f31f",
@@ -202,12 +205,32 @@ def _handle_deploy(args: dict[str, Any]) -> str:
     bypass = read_str(args, "bypass_tx_hash") or None
     burn = read_str(args, "burn_tx_hash") or None
 
+    # Classic non-custodial prepare path. The API routes chain based on a
+    # `chain` query param, which we pass through if the caller supplied it.
+    start_deploy_chain = read_str(args, "chain") or None
+
     try:
-        result = get_clawnch_service().deploy(
-            token_params=token_params,
-            bypass_tx_hash=bypass,
-            burn_tx_hash=burn,
-        )
+        if start_deploy_chain == "robinhood":
+            result = get_clawnch_service().prepare_deploy(
+                from_address=args.get("from_address") or "",
+                name=name,
+                symbol=symbol,
+                description=token_params.get("description"),
+                image=token_params.get("image"),
+                twitter=token_params.get("twitter"),
+                website=token_params.get("website"),
+                telegram=token_params.get("telegram"),
+                farcaster=token_params.get("farcaster"),
+                discord=token_params.get("discord"),
+                burn_tx_hash=burn,
+                chain="robinhood",
+            )
+        else:
+            result = get_clawnch_service().deploy(
+                token_params=token_params,
+                bypass_tx_hash=bypass,
+                burn_tx_hash=burn,
+            )
     except ClawnchError as exc:
         if exc.code == "burn_required":
             meta = exc.meta or {}
@@ -225,15 +248,21 @@ def _handle_deploy(args: dict[str, Any]) -> str:
 
     tx_hash = result.get("txHash") or result.get("tx_hash")
     token_address = result.get("tokenAddress") or result.get("token_address")
-    # Desktop UI: Clawnch launches are Base-only, so surface the tx explorer
-    # link plus Clanker / DexScreener / token-explorer links for the brand-new
-    # token as clickable Link artifacts. The enrich helpers no-op on missing or
-    # malformed values, so we call them unconditionally (passive descriptive
-    # keys — no preview auto-open from the tool itself).
+
+    # Surface the actual chain from the launch response. The clawn.ch API
+    # returns chainId in `data.chainId` (prepare path) or the deploy
+    # metadata; default to Base when absent so historical Base launches
+    # stay Base-tagged.
+    chain_id = int(result.get("chainId") or result.get("chain_id") or 8453)
+
+    # Desktop UI: surface the tx explorer link + token links for the
+    # brand-new token as clickable Link artifacts. Passive descriptive
+    # keys right now — no preview auto-open. enrich helpers no-op on
+    # missing values.
     from clawmes.lib.ui_artifacts import enrich_token_links, enrich_tx_links
 
-    enrich_tx_links(result, tx_hash=tx_hash or "", chain_id=8453)
-    enrich_token_links(result, token=token_address or "", chain_id=8453)
+    enrich_tx_links(result, tx_hash=tx_hash or "", chain_id=chain_id)
+    enrich_token_links(result, token=token_address or "", chain_id=chain_id)
 
     # Desktop UI: render a launch-receipt card and surface its path at the
     # envelope top level (json_result ``preview=``) so the desktop opens it in
