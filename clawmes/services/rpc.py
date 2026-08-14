@@ -57,6 +57,11 @@ _DEFAULT_ENDPOINTS: dict[int, str] = {
     10: "https://mainnet.optimism.io",
     # Polygon — official public RPC
     137: "https://polygon-rpc.com",
+    # Robinhood Chain — official public RPC. Rate-limited; Alchemy /
+    # QuickNode / Chainstack / dRPC offer dedicated endpoints on 4663.
+    4663: "https://rpc.mainnet.chain.robinhood.com",
+    # Robinhood Chain Testnet — official public RPC.
+    46630: "https://rpc.testnet.chain.robinhood.com",
 }
 
 

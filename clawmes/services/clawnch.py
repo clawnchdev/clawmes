@@ -290,19 +290,25 @@ class ClawnchService(Service):
         farcaster: str | None = None,
         discord: str | None = None,
         burn_tx_hash: str | None = None,
+        chain: str | None = None,
     ) -> dict[str, Any]:
-        """Get unsigned Clanker factory calldata for a non-custodial deploy.
+        """Get unsigned factory calldata for a non-custodial deploy.
 
-        Hits ``GET /api/prepare/deploy``. Returns the envelope shape:
+        ``chain`` (``"base"`` or ``"robinhood"``) is forwarded as the
+        ``chain`` query param to ``GET /api/prepare/deploy``. The server
+        resolves it into Clanker-vs-Bags calldata. Default is Base.
+
+        Returns the envelope shape:
 
             {
                 "ok": True,
-                "data": {"to": "0xE85A…", "data": "0xdf40224a…", "value": "0x0", "chainId": 8453},
+                "data": {"to": "0x…", "data": "0x…", "value": "0x…", "chainId": 8453},
                 "meta": {
                     "platformFeeBps": 2000,
                     "userFeeBps": 8000,
-                    "vaultPercentage": 0,
-                    "source": "base-mcp",
+                    "vaultPercentage": 0,   # 0 on the Robinhood path
+                    "creationFeeWei": "0",  # non-zero on Robinhood
+                    "chain": "base" | "robinhood",
                     ...
                 },
             }
@@ -315,16 +321,15 @@ class ClawnchService(Service):
         - No API key required (``/api/prepare/deploy`` is public).
         - No captcha solving — the wallet signs the deploy tx directly.
         - The user's wallet pays gas.
-        - Same 20% platform fee preserved in the rewards array.
+        - Same 20% platform fee preserved in the rewards array (Base)
+          or the Bags claimer array (Robinhood).
 
-        ``burn_tx_hash`` is **mandatory upstream**: every launch
+        ``burn_tx_hash`` is **mandatory upstream on Base**. Every launch
         requires a verified 1,000,000+ $CLAWNCH burn from
-        ``from_address`` to the dead address within 24h. Calling
-        without one raises ``ClawnchError`` with
-        ``code="burn_required"`` (HTTP 402) whose ``meta`` carries
-        ``minBurnTokens`` + ``burnAddress``. A verified burn also sets
-        the vault clause baked into the returned calldata (1M = 1%,
-        up to 10M = 10%).
+        ``from_address`` to the dead address within 24h; the Robinhood
+        path doesn't enforce it (Bags doesn't burn). Calling without one
+        raises ``ClawnchError`` with ``code="burn_required"`` whose
+        ``meta`` carries ``minBurnTokens`` + ``burnAddress``.
         """
         if not from_address:
             raise ClawnchError("bad_request", "from_address is required")
@@ -354,6 +359,8 @@ class ClawnchService(Service):
             params["discord"] = discord
         if burn_tx_hash:
             params["burnTxHash"] = burn_tx_hash
+        if chain:
+            params["chain"] = chain.lower()
 
         # Public endpoint — no auth header sent.
         body = self._get("/api/prepare/deploy", params=params)

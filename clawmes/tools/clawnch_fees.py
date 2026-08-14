@@ -8,11 +8,14 @@ Reads-side companion to ``clawnch_launch``. Two actions:
     far). Uses Clawnch's ``/api/launches?address=…`` endpoint.
 
 Claim-side ops aren't implemented here today: Clanker pays creator
-rewards via its own LP-fee accumulator (FeeLocker), not via a
-launchpad-controlled "claim()" function. Users claim through their
-Clanker dashboard or directly against the FeeLocker contract. Once
-v2 ships (the ClawnchFactory fork that drops Clanker), we'll revisit
-adding a launchpad-orchestrated claim action.
+rewards via its own LP-fee accumulator (FeeLocker) on Base, and Bags
+pays creator rewards via its own per-token ``BagsFeeShare`` ledger on
+Robinhood Chain (the per-token ``claim()`` on the feeShare contract
+returned by a Bags launch). Neither flows through Clawnch's HTTP claim
+path — Clawnch only reads launch metadata. Users claim through their
+Clanker dashboard (Base) or against the token's feeShare contract
+(Robinhood). Once v2 ships (the ClawnchFactory fork that drops
+Clanker), we'll revisit adding a launchpad-orchestrated claim action.
 
 Requires ``CLAWNCH_API_KEY`` for ``my_launches``; ``launch_info`` is
 public and works without a key.
