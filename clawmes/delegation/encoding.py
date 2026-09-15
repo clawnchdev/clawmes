@@ -18,10 +18,24 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from eth_abi import encode as abi_encode
-from eth_utils import keccak
-
 from clawmes.delegation.types import SignedDelegation, UnsignedDelegation
+
+
+# eth-abi / eth-utils are imported lazily: Hermes never auto-installs plugin
+# dependencies, and this module is reached from ``import clawmes`` (via
+# commands.delegation → compiler), so a module-level import would make the
+# whole plugin fail to load — and ``hermes plugins validate`` fail — wherever
+# the packages are missing. The wrappers keep every call site unchanged.
+def abi_encode(types: Sequence[str], values: Sequence[object]) -> bytes:
+    from eth_abi import encode
+
+    return encode(types, values)
+
+
+def keccak(*args: object, **kwargs: object) -> bytes:
+    from eth_utils import keccak as _keccak
+
+    return _keccak(*args, **kwargs)
 
 # The Solidity signature of the Delegation tuple (with args) used for the
 # permission context, disableDelegation, and getDelegationHash. Caveats
@@ -55,15 +69,17 @@ def selector(signature: str) -> str:
     return "0x" + keccak(text=signature)[:4].hex()
 
 
-# Precomputed selectors (verified against viem toFunctionSelector).
-SEL_REDEEM = selector("redeemDelegations(bytes[],bytes32[],bytes[])")
-SEL_DISABLE = selector(f"disableDelegation({_DELEGATION_TUPLE})")
-SEL_GET_HASH = selector(f"getDelegationHash({_DELEGATION_TUPLE})")
-SEL_DISABLED = selector("disabledDelegations(bytes32)")
+# Precomputed selectors (verified against viem toFunctionSelector). Kept as
+# literals so importing this module does not need eth-utils; each equals
+# ``selector(<signature>)`` and tests/delegation/test_encoding.py pins them.
+SEL_REDEEM = "0xcef6d209"  # redeemDelegations(bytes[],bytes32[],bytes[])
+SEL_DISABLE = "0x49934047"  # disableDelegation(_DELEGATION_TUPLE)
+SEL_GET_HASH = "0x66134607"  # getDelegationHash(_DELEGATION_TUPLE)
+SEL_DISABLED = "0x2d40d052"  # disabledDelegations(bytes32)
 
 # Enforcer read selectors (spentMap / callCounts share the same signature).
-SEL_SPENT_MAP = selector("spentMap(address,bytes32)")
-SEL_CALL_COUNTS = selector("callCounts(address,bytes32)")
+SEL_SPENT_MAP = "0x9dd5d9ab"  # spentMap(address,bytes32)
+SEL_CALL_COUNTS = "0x19054d89"  # callCounts(address,bytes32)
 
 
 # ─── caveat terms encoders ──────────────────────────────────────────────
