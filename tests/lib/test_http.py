@@ -30,6 +30,17 @@ class TestAllowlist:
         _check_allowlist("https://clawn.ch/api/agents/register")
         _check_allowlist("https://www.clawn.ch/api/agents/register")
 
+    def test_allows_robinhood_chain_hosts(self):
+        # Regression: the RHC RPC defaults shipped in services.rpc were not
+        # allowlisted, so the plugin blocked its OWN RPC hosts (every call
+        # raised NetworkAllowlistError before leaving the process).
+        _check_allowlist("https://rpc.mainnet.chain.robinhood.com")
+        _check_allowlist("https://rpc.testnet.chain.robinhood.com")
+        # RHC explorer + trade surfaces (links, and any future reads).
+        _check_allowlist("https://robinhoodchain.blockscout.com/api/v2/stats")
+        _check_allowlist("https://robinhoodchain-testnet.blockscout.com")
+        _check_allowlist("https://bags.fm/token/0x6a50F139F3eD4C9c7bDa0D067c5Ed09De1EEBbeA")
+
     def test_allows_llm_inference_gateways(self):
         # OpenAI-compatible inference providers (services.opengateway / venice).
         _check_allowlist("https://opengateway.gitlawb.com/v1/chat/completions")

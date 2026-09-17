@@ -217,16 +217,19 @@ class TestRunStatus:
     def test_rpc_check_ok_when_all_configured(self, capsys, monkeypatch, all_green):
         from clawmes.cli import doctor as doc
         from clawmes.services import rpc as rpc_mod
+        from clawmes.services.rpc import _DEFAULT_ENDPOINTS
 
         monkeypatch.setattr(rpc_mod, "_instance", None)
-        for cid in (1, 8453, 42161, 10, 137):
+        for cid in _DEFAULT_ENDPOINTS:
             monkeypatch.setenv(f"CLAWMES_RPC_{cid}", f"https://rpc-{cid}.example.com")
         monkeypatch.setattr(doc, "get_wallet_state", lambda: WalletState.disconnected())
 
         doc.run(_ns())
         out = capsys.readouterr().out
         assert "RPC endpoints" in out
-        assert "all 5 user-configured" in out
+        # Count follows the shipped default set (7 today: 1, 8453, 42161,
+        # 10, 137, 4663, 46630) — no hardcoded chain list to drift.
+        assert f"all {len(_DEFAULT_ENDPOINTS)} user-configured" in out
 
     def test_hermes_not_importable(self, capsys, monkeypatch, node_available):
         """Cover the ImportError branch in _gather_checks."""

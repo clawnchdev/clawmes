@@ -29,6 +29,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from clawmes.lib.http import http_post
 from clawmes.lib.logger import logger_for
@@ -57,6 +58,11 @@ _DEFAULT_ENDPOINTS: dict[int, str] = {
     10: "https://mainnet.optimism.io",
     # Polygon — official public RPC
     137: "https://polygon-rpc.com",
+    # Robinhood Chain — official public RPC. Rate-limited; Alchemy /
+    # QuickNode / Chainstack / dRPC offer dedicated endpoints on 4663.
+    4663: "https://rpc.mainnet.chain.robinhood.com",
+    # Robinhood Chain Testnet — official public RPC.
+    46630: "https://rpc.testnet.chain.robinhood.com",
 }
 
 
@@ -116,6 +122,32 @@ class RpcService(Service):
                 "set CLAWMES_RPC_<chain_id> (e.g. CLAWMES_RPC_8453) to "
                 "your own provider URL for any real workload.",
                 on_defaults,
+            )
+
+        # Self-check against our own network allowlist. Shipping a default
+        # endpoint whose host isn't allowlisted (e.g. a new chain added to
+        # _DEFAULT_ENDPOINTS but not to lib.http._DEFAULT_ALLOWLIST) makes
+        # every call fail with NetworkAllowlistError before it leaves the
+        # process — fail loudly at startup instead of at first use.
+        blocked_defaults = self.blocked_default_endpoints()
+        if blocked_defaults:
+            _log.error(
+                "default RPC endpoints for chains %s are NOT on the clawmes "
+                "network allowlist — every call will raise NetworkAllowlistError. "
+                "Add the hosts to clawmes.lib.http._DEFAULT_ALLOWLIST, or point "
+                "CLAWMES_RPC_<chain_id> at an allowlisted provider.",
+                sorted(blocked_defaults),
+            )
+
+        blocked_overrides = self.blocked_user_endpoints()
+        if blocked_overrides:
+            _log.warning(
+                "user-configured RPC endpoints for chains %s are NOT on the "
+                "clawmes network allowlist and will be rejected on use "
+                "(NetworkAllowlistError). Allow the host for this session with "
+                "/allow <host>, or add it to clawmes.network_allowlist.extra_hosts "
+                "in config.yaml.",
+                sorted(blocked_overrides),
             )
 
     def stop(self) -> None:
@@ -339,6 +371,56 @@ class RpcService(Service):
         with self._lock:
             ep = self._endpoints.get(chain_id)
         return ep is not None and ep.is_default
+
+    # --- allowlist self-check ------------------------------------------
+
+    @staticmethod
+    def _endpoint_host(url: str) -> str:
+        return (urlparse(url).hostname or "").lower()
+
+    def blocked_default_endpoints(self) -> dict[int, str]:
+        """Default endpoints the clawmes network allowlist would reject.
+
+        Maps ``chain_id -> url`` for every *shipped default* endpoint
+        whose host is not permitted by ``lib.http._DEFAULT_ALLOWLIST``
+        (plus the runtime user allowlist). An entry here means the
+        rpc service is broken for that chain by our own configuration —
+        exactly the Robinhood Chain regression this check exists to
+        catch. Empty is the only healthy value.
+        """
+        with self._lock:
+            candidates = {cid: ep.url for cid, ep in self._endpoints.items() if ep.is_default}
+        return self._blocked_endpoints(candidates)
+
+    def blocked_user_endpoints(self) -> dict[int, str]:
+        """User-configured endpoints the network allowlist would reject.
+
+        Same shape as :meth:`blocked_default_endpoints` but for
+        overrides (``CLAWMES_RPC_<chain_id>`` / config). These are
+        *expected* to be blocked until the user allows the host via
+        ``/allow`` or ``clawmes.network_allowlist.extra_hosts``; the
+        service only warns about them so the eventual
+        ``NetworkAllowlistError`` isn't a mystery.
+        """
+        with self._lock:
+            candidates = {cid: ep.url for cid, ep in self._endpoints.items() if not ep.is_default}
+        return self._blocked_endpoints(candidates)
+
+    def _blocked_endpoints(self, candidates: dict[int, str]) -> dict[int, str]:
+        if not candidates:
+            return {}
+        hosts = {cid: self._endpoint_host(url) for cid, url in candidates.items()}
+        try:
+            from clawmes.services.endpoint_allowlist import (
+                get_endpoint_allowlist_service,
+            )
+
+            blocked_hosts = set(get_endpoint_allowlist_service().blocked_hosts(hosts.values()))
+        except Exception:  # noqa: BLE001 — diagnostics must never break startup
+            return {}
+        return {
+            cid: candidates[cid] for cid, host in hosts.items() if host and host in blocked_hosts
+        }
 
 
 _instance: RpcService | None = None

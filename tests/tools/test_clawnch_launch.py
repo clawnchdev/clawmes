@@ -26,6 +26,32 @@ class _FakeSvc:
         self.deploy_raise: Exception | None = None
         self.info_return: dict = {"name": "X"}
         self.info_raise: Exception | None = None
+        self.prepare_raises: Exception | None = None
+        self.prepare_calls: list[dict] = []
+        self.rh_ticket_return: dict = {
+            "ok": True,
+            "data": {"to": "0xrouter", "data": "0xdead", "value": "0x1", "chainId": 4663},
+            "ticket": {"agent": "0x" + "1" * 40},
+            "meta": {
+                "chain": "robinhood",
+                "depositAddress": "0xdeposit",
+                "creationFeeWei": "20000000000000000",
+            },
+        }
+        self.rh_ticket_raises: Exception | None = None
+        self.rh_ticket_calls: list[dict] = []
+        self.rh_confirm_return: dict = {"ok": True, "launch": {"token": "0x" + "a" * 40}}
+        self.rh_confirm_raises: Exception | None = None
+        self.rh_confirm_calls: list[str] = []
+        self.rh_deposit_return: dict = {"ok": True, "launch": {"token": "0x" + "a" * 40}}
+        self.rh_deposit_raises: Exception | None = None
+        self.rh_deposit_calls: list[dict] = []
+        self.rh_token_info_return: dict = {
+            "chain": "robinhood",
+            "chain_id": 4663,
+            "token_address": "0x6a50F139F3eD4C9c7bDa0D067c5Ed09De1EEBbeA",
+            "trade_url": "https://bags.fm/token/0x6a50F139F3eD4C9c7bDa0D067c5Ed09De1EEBbeA",
+        }
 
     def deploy(self, *, token_params, bypass_tx_hash=None, burn_tx_hash=None):
         self.deploys.append(
@@ -44,6 +70,33 @@ class _FakeSvc:
         if self.info_raise:
             raise self.info_raise
         return self.info_return
+
+    def prepare_deploy(self, **kwargs):
+        self.prepare_calls.append(kwargs)
+        if self.prepare_raises:
+            raise self.prepare_raises
+        return self.deploy_return
+
+    def rh_ticket(self, **kwargs):
+        self.rh_ticket_calls.append(kwargs)
+        if self.rh_ticket_raises:
+            raise self.rh_ticket_raises
+        return self.rh_ticket_return
+
+    def rh_confirm_launch(self, *, tx_hash):
+        self.rh_confirm_calls.append(tx_hash)
+        if self.rh_confirm_raises:
+            raise self.rh_confirm_raises
+        return self.rh_confirm_return
+
+    def rh_deposit_launch(self, **kwargs):
+        self.rh_deposit_calls.append(kwargs)
+        if self.rh_deposit_raises:
+            raise self.rh_deposit_raises
+        return self.rh_deposit_return
+
+    def rh_token_info(self):
+        return self.rh_token_info_return
 
 
 @pytest.fixture
@@ -291,3 +344,239 @@ class TestRegister:
 
         register(FakeCtx())
         assert captured == ["clawnch_launch"]
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  Robinhood Chain actions
+# ──────────────────────────────────────────────────────────────────────
+
+_ADDR = "0x" + "a" * 40
+_WALLET = "0x" + "1" * 40
+_TX = "0x" + "f" * 64
+
+
+class TestExtractChainId:
+    def test_data_chain_id_wins(self):
+        from clawmes.tools.clawnch_launch import _extract_chain_id
+
+        assert _extract_chain_id({"data": {"chainId": 4663}}) == 4663
+        assert _extract_chain_id({"data": {"chainId": 8453}}) == 8453
+
+    def test_top_level_and_snake_case(self):
+        from clawmes.tools.clawnch_launch import _extract_chain_id
+
+        assert _extract_chain_id({"chainId": 4663}) == 4663
+        assert _extract_chain_id({"chain_id": "4663"}) == 4663
+        assert _extract_chain_id({"data": {"chain_id": 4663}}) == 4663
+
+    def test_meta_chain_fallback(self):
+        from clawmes.tools.clawnch_launch import _extract_chain_id
+
+        assert _extract_chain_id({"meta": {"chain": "robinhood"}}) == 4663
+
+    def test_base_default_only_when_absent(self):
+        from clawmes.tools.clawnch_launch import _extract_chain_id
+
+        # The Base custodial path echoes no chain id → Base.
+        assert _extract_chain_id({}) == 8453
+        assert _extract_chain_id({"txHash": "0x1"}) == 8453
+
+    def test_garbage_chain_id_falls_through(self):
+        from clawmes.tools.clawnch_launch import _extract_chain_id
+
+        assert _extract_chain_id({"data": {"chainId": "not-a-number"}}) == 8453
+
+
+class TestDeployChainGuard:
+    def test_robinhood_chain_surfaces_unsupported(self, fake_svc):
+        fake_svc.prepare_raises = ClawnchError(
+            "unsupported_chain", "prepare_deploy is Base-only … use rh_ticket"
+        )
+        out = json.loads(
+            clawnch_launch(
+                {
+                    "action": "deploy",
+                    "name": "Foo",
+                    "symbol": "FOO",
+                    "chain": "robinhood",
+                    "from_address": _WALLET,
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "unsupported_chain"
+        # The tool routed the request to the non-custodial prepare path —
+        # never silently through the Base custodial deploy.
+        assert fake_svc.prepare_calls[0]["chain"] == "robinhood"
+        assert fake_svc.prepare_calls[0]["from_address"] == _WALLET
+        assert fake_svc.deploys == []
+
+    def test_base_chain_uses_custodial_deploy(self, fake_svc):
+        out = json.loads(
+            clawnch_launch({"action": "deploy", "name": "Foo", "symbol": "FOO", "chain": "base"})
+        )
+        assert out["details"]["txHash"] == "0xtx"
+        assert fake_svc.prepare_calls == []
+
+
+class TestRHTicketAction:
+    def test_requires_name_symbol_wallet(self, fake_svc):
+        out = json.loads(clawnch_launch({"action": "rh_ticket", "name": "Foo"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+        out = json.loads(clawnch_launch({"action": "rh_ticket", "symbol": "FOO"}))
+        assert out["isError"] is True
+        out = json.loads(clawnch_launch({"action": "rh_ticket", "name": "Foo", "symbol": "FOO"}))
+        assert out["isError"] is True
+        assert "from_address" in out["content"][0]["text"]
+
+    def test_success_path(self, fake_svc):
+        out = json.loads(
+            clawnch_launch(
+                {
+                    "action": "rh_ticket",
+                    "name": "Foo",
+                    "symbol": "FOO",
+                    "from_address": _WALLET,
+                    "description": "d",
+                    "image": "https://x/i.png",
+                    "fee_recipient": _ADDR,
+                }
+            )
+        )
+        assert out["details"]["data"]["chainId"] == 4663
+        call = fake_svc.rh_ticket_calls[0]
+        assert call["agent_wallet"] == _WALLET
+        assert call["name"] == "Foo"
+        assert call["symbol"] == "FOO"
+        assert call["description"] == "d"
+        assert call["image"] == "https://x/i.png"
+        assert call["fee_recipient"] == _ADDR
+        text = out["content"][0]["text"]
+        assert "rh_confirm" in text
+        assert "0xdeposit" in text  # deposit-path guidance
+
+    def test_error_surfaces_code(self, fake_svc):
+        fake_svc.rh_ticket_raises = ClawnchError("wallet_mismatch", "wrong wallet")
+        out = json.loads(
+            clawnch_launch(
+                {"action": "rh_ticket", "name": "Foo", "symbol": "FOO", "from_address": _WALLET}
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "wallet_mismatch"
+
+    def test_unexpected_error(self, fake_svc):
+        fake_svc.rh_ticket_raises = RuntimeError("boom")
+        out = json.loads(
+            clawnch_launch(
+                {"action": "rh_ticket", "name": "Foo", "symbol": "FOO", "from_address": _WALLET}
+            )
+        )
+        assert out["details"]["error_code"] == "api_error"
+
+
+class TestRHConfirmAction:
+    def test_requires_tx_hash(self, fake_svc):
+        out = json.loads(clawnch_launch({"action": "rh_confirm"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_success_adds_links(self, fake_svc):
+        out = json.loads(clawnch_launch({"action": "rh_confirm", "tx_hash": _TX}))
+        assert fake_svc.rh_confirm_calls == [_TX]
+        assert out["details"]["explorer_url"] == f"https://robinhoodchain.blockscout.com/tx/{_TX}"
+        token = out["details"]["launch"]["token"]
+        assert out["details"]["trade_url"] == f"https://bags.fm/token/{token}"
+        assert out["details"]["token_explorer_url"].startswith(
+            "https://robinhoodchain.blockscout.com/token/"
+        )
+
+    def test_error_surfaces_code(self, fake_svc):
+        fake_svc.rh_confirm_raises = ClawnchError("tx_not_found", "no such tx")
+        out = json.loads(clawnch_launch({"action": "rh_confirm", "tx_hash": _TX}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "tx_not_found"
+
+    def test_unexpected_error(self, fake_svc):
+        fake_svc.rh_confirm_raises = RuntimeError("boom")
+        out = json.loads(clawnch_launch({"action": "rh_confirm", "tx_hash": _TX}))
+        assert out["details"]["error_code"] == "api_error"
+
+
+class TestRHDepositAction:
+    def test_requires_all_fields(self, fake_svc):
+        out = json.loads(clawnch_launch({"action": "rh_deposit"}))
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "param_error"
+
+    def test_success_path(self, fake_svc):
+        out = json.loads(
+            clawnch_launch(
+                {
+                    "action": "rh_deposit",
+                    "deposit_tx_hash": _TX,
+                    "from_address": _WALLET,
+                    "name": "Foo",
+                    "symbol": "FOO",
+                    "description": "d",
+                }
+            )
+        )
+        call = fake_svc.rh_deposit_calls[0]
+        assert call["deposit_tx_hash"] == _TX
+        assert call["agent_wallet"] == _WALLET
+        assert call["name"] == "Foo"
+        assert call["symbol"] == "FOO"
+        assert out["details"]["trade_url"] == f"https://bags.fm/token/{_ADDR}"
+        assert "deposit" in out["content"][0]["text"]
+
+    def test_error_surfaces_code(self, fake_svc):
+        fake_svc.rh_deposit_raises = ClawnchError("duplicate_deposit", "used")
+        out = json.loads(
+            clawnch_launch(
+                {
+                    "action": "rh_deposit",
+                    "deposit_tx_hash": _TX,
+                    "from_address": _WALLET,
+                    "name": "Foo",
+                    "symbol": "FOO",
+                }
+            )
+        )
+        assert out["isError"] is True
+        assert out["details"]["error_code"] == "duplicate_deposit"
+
+    def test_unexpected_error(self, fake_svc):
+        fake_svc.rh_deposit_raises = RuntimeError("boom")
+        out = json.loads(
+            clawnch_launch(
+                {
+                    "action": "rh_deposit",
+                    "deposit_tx_hash": _TX,
+                    "from_address": _WALLET,
+                    "name": "Foo",
+                    "symbol": "FOO",
+                }
+            )
+        )
+        assert out["details"]["error_code"] == "api_error"
+
+
+class TestRHTokenAction:
+    def test_returns_rhc_token(self, fake_svc):
+        out = json.loads(clawnch_launch({"action": "rh_token"}))
+        assert out["details"]["token_address"] == "0x6a50F139F3eD4C9c7bDa0D067c5Ed09De1EEBbeA"
+        assert "bags.fm" in out["content"][0]["text"]
+
+
+class TestSchema:
+    def test_rhc_actions_advertised(self):
+        from clawmes.tools.clawnch_launch import _SCHEMA
+
+        enum = _SCHEMA["properties"]["action"]["enum"]
+        assert {"rh_ticket", "rh_confirm", "rh_deposit", "rh_token"} <= set(enum)
+        # from_address / tx_hash / deposit_tx_hash are declared (the RHC
+        # flows are unreachable otherwise).
+        for key in ("from_address", "tx_hash", "deposit_tx_hash", "chain"):
+            assert key in _SCHEMA["properties"]

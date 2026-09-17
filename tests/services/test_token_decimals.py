@@ -93,6 +93,16 @@ class TestRpcLookup:
         d = svc.get(token, 8453)
         assert d == 18
 
+    def test_robinhood_chain_lookup(self, fake_rpc):
+        """The lookup is chain-agnostic: chain 4663 reads work exactly like
+        Base reads once the RHC RPC host is allowlisted (see services.rpc's
+        allowlist self-check)."""
+        svc = TokenDecimalsService()
+        svc.start()
+        rhc_clawnch = "0x6a50F139F3eD4C9c7bDa0D067c5Ed09De1EEBbeA"
+        fake_rpc.responses[rhc_clawnch.lower()] = "0x12"
+        assert svc.get_strict(rhc_clawnch, 4663) == 18
+
 
 class TestStrictMode:
     def test_strict_seed_returns_value(self, fake_rpc):

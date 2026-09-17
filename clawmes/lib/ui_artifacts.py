@@ -50,6 +50,11 @@ _CLANKER_CHAIN_ID = 8453
 _CLANKER_BASE_URL = "https://clanker.world/clanker"
 _DEXSCREENER_BASE_URL = "https://dexscreener.com"
 
+# Bags.fm is the Robinhood Chain launchpad + trade surface (the RHC
+# counterpart of Clanker's token page).
+_BAGS_CHAIN_ID = 4663
+_BAGS_TOKEN_URL_BASE = "https://bags.fm/token"
+
 
 def _is_tx_hash(value: str) -> bool:
     """True for a ``0x`` + 64 hex-char transaction hash."""
@@ -114,6 +119,13 @@ def clanker_url(token: str, chain_id: int = _CLANKER_CHAIN_ID) -> str | None:
     return f"{_CLANKER_BASE_URL}/{token}"
 
 
+def bags_url(token: str, chain_id: int = _BAGS_CHAIN_ID) -> str | None:
+    """Bags.fm token page URL (Robinhood Chain only), or None otherwise."""
+    if chain_id != _BAGS_CHAIN_ID or not _is_address(token):
+        return None
+    return f"{_BAGS_TOKEN_URL_BASE}/{token}"
+
+
 def enrich_tx_links(details: dict[str, Any], *, tx_hash: str, chain_id: int) -> dict[str, Any]:
     """Add an ``explorer_url`` for ``tx_hash`` to ``details`` (in place).
 
@@ -136,8 +148,9 @@ def enrich_token_links(
 ) -> dict[str, Any]:
     """Add market/explorer links for a token to ``details`` (in place).
 
-    Adds ``dexscreener_url`` and ``token_explorer_url`` (and ``clanker_url`` on
-    Base when ``include_clanker``). Existing keys are preserved. Returns
+    Adds ``dexscreener_url`` and ``token_explorer_url`` (plus
+    ``clanker_url`` on Base — and ``bags_url`` on Robinhood Chain — when
+    ``include_clanker``). Existing keys are preserved. Returns
     ``details`` for chaining.
     """
     dex = dexscreener_url(token, chain_id)
@@ -152,5 +165,9 @@ def enrich_token_links(
         clank = clanker_url(token, chain_id)
         if clank and "clanker_url" not in details:
             details["clanker_url"] = clank
+
+        bags = bags_url(token, chain_id)
+        if bags and "bags_url" not in details:
+            details["bags_url"] = bags
 
     return details

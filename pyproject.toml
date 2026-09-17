@@ -1,6 +1,6 @@
 [project]
 name = "clawmes"
-version = "0.20.0"
+version = "0.21.0"
 description = "Hermes Agent plugin for crypto: wallets, DEX trading, lending and staking, governance, on-chain automation."
 readme = "README.md"
 license = { text = "MIT" }
@@ -66,7 +66,7 @@ dev = [
     # MCP SDK is in dev so tests/mcp_server/* can import it; the same
     # SDK ships under the [mcp] extra for production use of the
     # clawmes-mcp script entry.
-    "mcp>=1.0",
+    "mcp>=1.0,<2",
 ]
 test-network = [
     "responses>=0.25",
@@ -78,7 +78,7 @@ test-network = [
 # Run with:
 #   clawmes-mcp
 mcp = [
-    "mcp>=1.0",
+    "mcp>=1.0,<2",
 ]
 all = [
     "clawmes[dev,test-network,mcp]",

@@ -960,6 +960,696 @@ class TestErrorReclassify:
 
 
 # ──────────────────────────────────────────────────────────────────────
+#  Robinhood Chain — launch ticket / deposit / claim / feed
+# ──────────────────────────────────────────────────────────────────────
+
+_TX = "0x" + "f" * 64
+_ROUTER_TX = "0x" + "e" * 64
+_WALLET = "0x" + "1" * 40
+
+
+def _rh_ticket_response(**overrides):
+    """The upstream ticket envelope (mirrors api/robinhood/ticket.ts)."""
+    resp = {
+        "ok": True,
+        "data": {
+            "to": "0xdd4e0000000000000000000000000000000053b5",
+            "data": "0xdeadbeef",
+            "value": "0x470de4df820000",
+            "chainId": 4663,
+        },
+        "ticket": {
+            "agent": _WALLET,
+            "feeRecipient": _WALLET,
+            "paramsHash": "0x" + "a" * 64,
+            "nonce": "1",
+            "deadline": "1800000000",
+            "signature": "0x" + "b" * 130,
+        },
+        "meta": {
+            "backend": "bags",
+            "chain": "robinhood",
+            "router": "0xdd4e0000000000000000000000000000000053b5",
+            "depositAddress": "0xde0000000000000000000000000000000000ad",
+            "creationFeeWei": "20000000000000000",
+            "ttlSeconds": 600,
+        },
+    }
+    resp.update(overrides)
+    return resp
+
+
+class TestRHUrlHelpers:
+    def test_trade_url(self):
+        from clawmes.services.clawnch import rh_trade_url
+
+        assert rh_trade_url(ADDR) == f"https://bags.fm/token/{ADDR}"
+        assert rh_trade_url("0xnothex") is None
+        assert rh_trade_url("") is None
+        assert rh_trade_url(None) is None  # type: ignore[arg-type]
+
+    def test_explorer_token_url(self):
+        from clawmes.services.clawnch import rh_explorer_token_url
+
+        assert rh_explorer_token_url(ADDR) == (
+            f"https://robinhoodchain.blockscout.com/token/{ADDR}"
+        )
+        assert rh_explorer_token_url("0xbad") is None
+
+    def test_explorer_tx_url(self):
+        from clawmes.services.clawnch import rh_explorer_tx_url
+
+        assert rh_explorer_tx_url(_TX) == f"https://robinhoodchain.blockscout.com/tx/{_TX}"
+        assert rh_explorer_tx_url("0xshort") is None
+        assert rh_explorer_tx_url(ADDR) is None  # address is not a tx hash
+
+    def test_is_tx_hash(self):
+        from clawmes.services.clawnch import is_tx_hash
+
+        assert is_tx_hash(_TX) is True
+        assert is_tx_hash("0x" + "F" * 64) is True
+        assert is_tx_hash("0X" + "f" * 64) is False
+        assert is_tx_hash("0x" + "g" * 64) is False
+        assert is_tx_hash(42) is False
+        assert is_tx_hash(None) is False
+
+
+class TestRHTokenInfo:
+    def test_default_address(self, svc):
+        info = svc.rh_token_info()
+        assert info["token_address"] == "0x6a50F139F3eD4C9c7bDa0D067c5Ed09De1EEBbeA"
+        assert info["chain"] == "robinhood"
+        assert info["chain_id"] == 4663
+        assert info["trade_url"].startswith("https://bags.fm/token/0x6a50")
+        assert "robinhoodchain.blockscout.com" in info["explorer_url"]
+
+    def test_env_override(self, monkeypatch, svc):
+        monkeypatch.setenv("CLAWNCH_RH_TOKEN_ADDRESS", "0x" + "c" * 40)
+        info = svc.rh_token_info()
+        assert info["token_address"] == "0x" + "c" * 40
+
+
+class TestGetBurnConfigChains:
+    def test_default_is_base(self, svc):
+        cfg = svc.get_burn_config()
+        assert cfg["chain"] == "base"
+        assert cfg["chain_id"] == 8453
+        assert cfg["burn_required"] is True
+
+    def test_robinhood_has_no_burn_and_rhc_token(self, svc):
+        cfg = svc.get_burn_config(chain="robinhood")
+        assert cfg["chain"] == "robinhood"
+        assert cfg["chain_id"] == 4663
+        assert cfg["token_address"] == "0x6a50F139F3eD4C9c7bDa0D067c5Ed09De1EEBbeA"
+        assert cfg["burn_address"] is None
+        assert cfg["min_burn_tokens"] == 0
+        assert cfg["burn_required"] is False
+
+    def test_robinhood_aliases(self, svc):
+        for alias in ("rh", "4663", "ROBINHOOD"):
+            assert svc.get_burn_config(chain=alias)["chain_id"] == 4663
+
+    def test_unknown_chain_raises(self, svc):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.get_burn_config(chain="solana")
+        assert exc_info.value.code == "bad_request"
+
+
+class TestRHTicket:
+    def test_requires_api_key(self, svc):
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_ticket(agent_wallet=_WALLET, name="X", symbol="X")
+        assert exc_info.value.code == "no_credentials"
+
+    def test_requires_valid_wallet(self, svc_with_key):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet="", name="X", symbol="X")
+        assert exc_info.value.code == "bad_request"
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet="0xnope", name="X", symbol="X")
+        assert exc_info.value.code == "bad_request"
+
+    def test_requires_name_and_symbol(self, svc_with_key):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="", symbol="X")
+        assert exc_info.value.code == "bad_request"
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="")
+        assert exc_info.value.code == "bad_request"
+
+    def test_name_and_symbol_length_caps(self, svc_with_key):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="x" * 33, symbol="X")
+        assert "name too long" in exc_info.value.message
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="x" * 11)
+        assert "symbol too long" in exc_info.value.message
+
+    def test_rejects_bad_fee_recipient(self, svc_with_key):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(
+                agent_wallet=_WALLET, name="X", symbol="X", fee_recipient="0xnope"
+            )
+        assert exc_info.value.code == "bad_request"
+
+    def test_posts_ticket_with_bearer_auth(self, svc_with_key, monkeypatch):
+        captured: list[tuple] = []
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            captured.append((url, json, headers))
+            return _rh_ticket_response()
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        out = svc_with_key.rh_ticket(
+            agent_wallet=_WALLET,
+            name="MyCoin",
+            symbol="MYC",
+            description="desc",
+            image="https://x/i.png",
+            fee_recipient="0x" + "2" * 40,
+        )
+        assert out["ok"] is True
+        url, body, headers = captured[0]
+        assert url.endswith("/api/robinhood/ticket")
+        assert headers["Authorization"] == "Bearer test-key"
+        assert body["agentWallet"] == _WALLET
+        assert body["name"] == "MyCoin"
+        assert body["symbol"] == "MYC"
+        assert body["description"] == "desc"
+        assert body["image"] == "https://x/i.png"
+        assert body["feeRecipient"] == "0x" + "2" * 40
+
+    def test_minimal_body_omits_optionals(self, svc_with_key, monkeypatch):
+        captured: list[dict] = []
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            captured.append(json)
+            return _rh_ticket_response()
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="X")
+        assert set(captured[0]) == {"agentWallet", "name", "symbol"}
+
+    def test_refuses_wrong_chain_ticket(self, svc_with_key, monkeypatch):
+        resp = _rh_ticket_response()
+        resp["data"]["chainId"] = 8453
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            return resp
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="X")
+        assert exc_info.value.code == "api_error"
+        assert "4663" in exc_info.value.message
+
+    def test_refuses_wrong_chain_meta(self, svc_with_key, monkeypatch):
+        resp = _rh_ticket_response()
+        resp["data"].pop("chainId")
+        resp["meta"]["chain"] = "base"
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            return resp
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="X")
+        assert exc_info.value.code == "api_error"
+
+    def test_ok_false_wallet_mismatch_passthrough(self, svc_with_key, monkeypatch):
+        def _post(url, json, headers, timeout):  # noqa: A002
+            return {
+                "ok": False,
+                "error": "agentWallet must match the registered agent wallet",
+                "code": "wallet_mismatch",
+            }
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="X")
+        assert exc_info.value.code == "wallet_mismatch"
+
+    def test_unauthorized_code_maps_to_no_credentials(self, svc_with_key, monkeypatch):
+        def _post(url, json, headers, timeout):  # noqa: A002
+            return {"ok": False, "error": "register first", "code": "unauthorized"}
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="X")
+        assert exc_info.value.code == "no_credentials"
+
+    def test_non_dict_body_raises_api_error(self, svc_with_key, monkeypatch):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_post",
+            lambda *a, **k: ["not", "a", "dict"],
+        )
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="X")
+        assert exc_info.value.code == "api_error"
+
+    def test_http_401_maps_to_no_credentials(self, svc_with_key, monkeypatch):
+        exc = _HTTPErr(_FakeResponse(401, {"ok": False, "code": "unauthorized"}))
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            raise exc
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_ticket(agent_wallet=_WALLET, name="X", symbol="X")
+        assert exc_info.value.code == "no_credentials"
+
+
+class TestRHConfirmLaunch:
+    def test_requires_api_key(self, svc):
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_confirm_launch(tx_hash=_TX)
+        assert exc_info.value.code == "no_credentials"
+
+    def test_rejects_bad_tx_hash(self, svc_with_key):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_confirm_launch(tx_hash="0x123")
+        assert exc_info.value.code == "bad_request"
+
+    def test_posts_confirm_mode(self, svc_with_key, monkeypatch):
+        captured: list[tuple] = []
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            captured.append((url, json))
+            return {"ok": True, "launch": {"token": ADDR, "agent": _WALLET, "mode": "ticket"}}
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        out = svc_with_key.rh_confirm_launch(tx_hash=_TX)
+        assert out["launch"]["token"] == ADDR
+        url, body = captured[0]
+        assert url.endswith("/api/robinhood/launch")
+        assert body == {"mode": "confirm", "txHash": _TX}
+
+    def test_tx_not_found_maps_to_not_found(self, svc_with_key, monkeypatch):
+        exc = _HTTPErr(
+            _FakeResponse(404, {"ok": False, "error": "not found", "code": "tx_not_found"})
+        )
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            raise exc
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_confirm_launch(tx_hash=_TX)
+        assert exc_info.value.code == "not_found"
+
+    def test_not_agentic_launch_passthrough(self, svc_with_key, monkeypatch):
+        exc = _HTTPErr(
+            _FakeResponse(
+                400,
+                {"ok": False, "error": "no AgenticLaunch event", "code": "not_agentic_launch"},
+            )
+        )
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            raise exc
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_confirm_launch(tx_hash=_TX)
+        assert exc_info.value.code == "not_agentic_launch"
+
+
+class TestRHDepositLaunch:
+    def test_requires_api_key(self, svc):
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_deposit_launch(deposit_tx_hash=_TX, agent_wallet=_WALLET, name="X", symbol="X")
+        assert exc_info.value.code == "no_credentials"
+
+    def test_validations(self, svc_with_key):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_deposit_launch(
+                deposit_tx_hash=_TX, agent_wallet="0xnope", name="X", symbol="X"
+            )
+        assert exc_info.value.code == "bad_request"
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_deposit_launch(
+                deposit_tx_hash="0xbad", agent_wallet=_WALLET, name="X", symbol="X"
+            )
+        assert exc_info.value.code == "bad_request"
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_deposit_launch(
+                deposit_tx_hash=_TX, agent_wallet=_WALLET, name="", symbol="X"
+            )
+        assert exc_info.value.code == "bad_request"
+
+    def test_posts_deposit_mode(self, svc_with_key, monkeypatch):
+        captured: list[tuple] = []
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            captured.append((url, json))
+            return {"ok": True, "launch": {"token": ADDR, "mode": "deposit"}}
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        out = svc_with_key.rh_deposit_launch(
+            deposit_tx_hash=_TX,
+            agent_wallet=_WALLET,
+            name="MyCoin",
+            symbol="MYC",
+            description="d",
+            image="https://x/i.png",
+        )
+        assert out["launch"]["mode"] == "deposit"
+        url, body = captured[0]
+        assert url.endswith("/api/robinhood/launch")
+        assert body["mode"] == "deposit"
+        assert body["depositTxHash"] == _TX
+        assert body["agentWallet"] == _WALLET
+        assert body["name"] == "MyCoin"
+        assert body["symbol"] == "MYC"
+        assert body["description"] == "d"
+        assert body["image"] == "https://x/i.png"
+
+    def test_duplicate_deposit_passthrough(self, svc_with_key, monkeypatch):
+        exc = _HTTPErr(
+            _FakeResponse(409, {"ok": False, "error": "used", "code": "duplicate_deposit"})
+        )
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            raise exc
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_deposit_launch(
+                deposit_tx_hash=_TX, agent_wallet=_WALLET, name="X", symbol="X"
+            )
+        assert exc_info.value.code == "duplicate_deposit"
+
+    def test_deposit_invalid_passthrough(self, svc_with_key, monkeypatch):
+        exc = _HTTPErr(
+            _FakeResponse(400, {"ok": False, "error": "bad deposit", "code": "deposit_invalid"})
+        )
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            raise exc
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_deposit_launch(
+                deposit_tx_hash=_TX, agent_wallet=_WALLET, name="X", symbol="X"
+            )
+        assert exc_info.value.code == "deposit_invalid"
+
+
+class TestRHClaimable:
+    _PAYLOAD = {
+        "ok": True,
+        "chainId": 4663,
+        "token": ADDR,
+        "address": _WALLET,
+        "feeShare": "0x" + "e" * 40,
+        "isClaimer": True,
+        "bps": 4000,
+        "claimableWei": "1000000000000000",
+        "claim": {"to": "0x" + "e" * 40, "data": "0x1234", "value": "0x0", "chainId": 4663},
+    }
+
+    def test_validations(self, svc):
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_claimable(token="0xnope", address=_WALLET)
+        assert exc_info.value.code == "bad_request"
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_claimable(token=ADDR, address="0xnope")
+        assert exc_info.value.code == "bad_request"
+
+    def test_public_read_sends_params(self, svc, monkeypatch):
+        captured: list[tuple] = []
+
+        def _get(url, params=None, headers=None, timeout=None):
+            captured.append((url, params, headers))
+            return self._PAYLOAD
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
+        svc.start()  # no key
+        out = svc.rh_claimable(token=ADDR, address=_WALLET)
+        assert out["claimableWei"] == "1000000000000000"
+        url, params, headers = captured[0]
+        assert url.endswith("/api/robinhood/claim")
+        assert params == {"token": ADDR, "address": _WALLET}
+        # Public read works without auth.
+        assert "Authorization" not in headers
+
+    def test_no_fee_share_passthrough(self, svc, monkeypatch):
+        exc = _HTTPErr(
+            _FakeResponse(404, {"ok": False, "error": "not a Bags token", "code": "no_fee_share"})
+        )
+
+        def _get(url, params=None, headers=None, timeout=None):
+            raise exc
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_claimable(token=ADDR, address=_WALLET)
+        assert exc_info.value.code == "no_fee_share"
+
+
+class TestRHClaim:
+    def test_requires_api_key(self, svc):
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_claim(token=ADDR)
+        assert exc_info.value.code == "no_credentials"
+
+    def test_requires_valid_token(self, svc_with_key):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_claim(token="0xnope")
+        assert exc_info.value.code == "bad_request"
+
+    def test_posts_claim_request(self, svc_with_key, monkeypatch):
+        captured: list[tuple] = []
+        payload = {
+            "ok": True,
+            "ready": True,
+            "claimableWei": "1000000000000000",
+            "claimableEth": "0.001000",
+            "claim": {
+                "to": "0x" + "e" * 40,
+                "data": "0xdeadbeef",
+                "value": "0x0",
+                "chainId": 4663,
+            },
+        }
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            captured.append((url, json, headers))
+            return payload
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        out = svc_with_key.rh_claim(token=ADDR)
+        assert out["ready"] is True
+        url, body, headers = captured[0]
+        assert url.endswith("/api/robinhood/claim")
+        assert body == {"token": ADDR}
+        assert headers["Authorization"] == "Bearer test-key"
+
+    def test_ready_false_is_not_an_error(self, svc_with_key, monkeypatch):
+        def _post(url, json, headers, timeout):  # noqa: A002
+            return {"ok": True, "ready": False, "claimableWei": "0", "claim": None}
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        out = svc_with_key.rh_claim(token=ADDR)
+        assert out["ready"] is False
+        assert out["claim"] is None
+
+    def test_refuses_wrong_chain_claim_tx(self, svc_with_key, monkeypatch):
+        def _post(url, json, headers, timeout):  # noqa: A002
+            return {
+                "ok": True,
+                "ready": True,
+                "claim": {"to": "0x" + "e" * 40, "data": "0x", "value": "0x0", "chainId": 8453},
+            }
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_claim(token=ADDR)
+        assert exc_info.value.code == "api_error"
+        assert "8453" in exc_info.value.message
+
+    def test_not_claimer_403_stays_not_claimer(self, svc_with_key, monkeypatch):
+        """A 403 must not be flattened to no_credentials when the body says
+        the wallet simply isn't a claimer (the API key IS valid)."""
+        exc = _HTTPErr(
+            _FakeResponse(403, {"ok": False, "error": "not a claimer", "code": "not_claimer"})
+        )
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            raise exc
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        with pytest.raises(ClawnchError) as exc_info:
+            svc_with_key.rh_claim(token=ADDR)
+        assert exc_info.value.code == "not_claimer"
+
+
+class TestRHLaunches:
+    def test_rejects_bad_agent(self, svc):
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_launches(agent="0xnope")
+        assert exc_info.value.code == "bad_request"
+
+    def test_rejects_bad_pagination(self, svc):
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_launches(limit=0)
+        assert exc_info.value.code == "bad_request"
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_launches(offset=-1)
+        assert exc_info.value.code == "bad_request"
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_launches(limit="lots")  # type: ignore[arg-type]
+        assert exc_info.value.code == "bad_request"
+
+    def test_reads_and_decorates_rows(self, svc, monkeypatch):
+        captured: list[tuple] = []
+        payload = {
+            "ok": True,
+            "chain": "robinhood",
+            "launches": [
+                {
+                    "token": ADDR,
+                    "agent": _WALLET,
+                    "name": "MyCoin",
+                    "symbol": "MYC",
+                    "mode": "ticket",
+                    "txHash": _TX,
+                    "routerTxHash": _ROUTER_TX,
+                    "chainId": 4663,
+                },
+                {"token": "0xnothex", "name": "junk"},
+            ],
+            "pagination": {"limit": 50, "offset": 0, "total": 2, "hasMore": False},
+        }
+
+        def _get(url, params=None, headers=None, timeout=None):
+            captured.append((url, params))
+            return payload
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
+        svc.start()
+        out = svc.rh_launches()
+        url, params = captured[0]
+        assert url.endswith("/api/robinhood/launches")
+        assert params == {"limit": "50", "offset": "0"}
+        first = out["launches"][0]
+        assert first["trade_url"] == f"https://bags.fm/token/{ADDR}"
+        assert first["explorer_url"] == f"https://robinhoodchain.blockscout.com/token/{ADDR}"
+        assert first["tx_url"] == f"https://robinhoodchain.blockscout.com/tx/{_TX}"
+        assert first["router_tx_url"] == (f"https://robinhoodchain.blockscout.com/tx/{_ROUTER_TX}")
+        assert first["chain"] == "robinhood"
+        assert first["chain_id"] == 4663
+        # Row with an invalid token gets no fabricated links.
+        assert "trade_url" not in out["launches"][1]
+
+    def test_clamps_limit_and_forwards_agent(self, svc, monkeypatch):
+        captured: list[dict] = []
+
+        def _get(url, params=None, headers=None, timeout=None):
+            captured.append(params or {})
+            return {"ok": True, "launches": [], "pagination": {}}
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
+        svc.start()
+        svc.rh_launches(agent=_WALLET, limit=9999, offset=5)
+        assert captured[0]["limit"] == "200"
+        assert captured[0]["offset"] == "5"
+        assert captured[0]["agent"] == _WALLET
+
+    def test_ok_false_raises(self, svc, monkeypatch):
+        monkeypatch.setattr(
+            "clawmes.services.clawnch.http_get",
+            lambda *a, **k: {"ok": False, "error": "boom", "code": "launches_error"},
+        )
+        svc.start()
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.rh_launches()
+        assert exc_info.value.code == "api_error"
+
+
+class TestRHCWrongChainGuards:
+    """Base-only surfaces must refuse RHC requests instead of silently
+    running against the wrong chain."""
+
+    def test_deploy_robinhood_refused(self, svc):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.deploy(token_params={"name": "X", "symbol": "X"}, chain="robinhood")
+        assert exc_info.value.code == "unsupported_chain"
+        assert "rh_ticket" in exc_info.value.message
+
+    def test_deploy_unknown_chain_refused(self, svc):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.deploy(token_params={"name": "X", "symbol": "X"}, chain="solana")
+        assert exc_info.value.code == "bad_request"
+
+    def test_deploy_base_default_still_works(self, svc_with_key, monkeypatch):
+        responses = [
+            {
+                "challengeId": "cid",
+                "message": "msg",
+                "nonce": "nonce",
+                "contractAddress": "0x4200000000000000000000000000000000000006",
+                "storageSlot": "0x00",
+                "deadline": "2030",
+            },
+            {"success": True, "txHash": "0xtx", "tokenAddress": "0xtok"},
+        ]
+
+        def _post(url, json, headers, timeout):  # noqa: A002
+            return responses.pop(0)
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_post", _post)
+        monkeypatch.setattr(
+            "clawmes.services.wallet.get_wallet_service",
+            lambda: _FakeWalletSvc(_FakeWalletMode()),
+        )
+        monkeypatch.setattr(
+            "clawmes.services.rpc.get_rpc_service",
+            lambda: _FakeRpc("0xff"),
+        )
+        out = svc_with_key.deploy(token_params={"name": "X", "symbol": "X"})
+        assert out["success"] is True
+
+    def test_prepare_deploy_robinhood_refused(self, svc):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(
+                from_address="0x" + "1" * 40, name="X", symbol="X", chain="robinhood"
+            )
+        assert exc_info.value.code == "unsupported_chain"
+        assert "rh_ticket" in exc_info.value.message
+
+    def test_prepare_deploy_unknown_chain_refused(self, svc):
+        with pytest.raises(ClawnchError) as exc_info:
+            svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X", chain="solana")
+        assert exc_info.value.code == "bad_request"
+
+    def test_prepare_deploy_base_does_not_send_chain_param(self, svc, monkeypatch):
+        captured: list[dict] = []
+
+        def _get(url, params=None, headers=None, timeout=None):
+            captured.append(params or {})
+            return {
+                "ok": True,
+                "data": {"to": "0x1", "data": "0x2", "value": "0x0", "chainId": 8453},
+                "meta": {},
+            }
+
+        monkeypatch.setattr("clawmes.services.clawnch.http_get", _get)
+        svc.start()
+        svc.prepare_deploy(from_address="0x" + "1" * 40, name="X", symbol="X", chain="base")
+        # The server ignores the chain param — never send it.
+        assert "chain" not in captured[0]
+
+
+# ──────────────────────────────────────────────────────────────────────
 #  Singleton
 # ──────────────────────────────────────────────────────────────────────
 

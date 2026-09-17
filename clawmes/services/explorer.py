@@ -78,6 +78,37 @@ class ExplorerError(RuntimeError):
     """Raised when an explorer API returns a non-success result."""
 
 
+def _blockscout_url(chain_id: int) -> str | None:
+    """Blockscout base URL for ``chain_id`` if its explorer is Blockscout.
+
+    Blockscout (used by Robinhood Chain) is *not* Etherscan-API
+    compatible, so this service can't serve those chains — but the
+    error we raise should point at the right explorer instead of a
+    generic "unknown chain".
+    """
+    try:
+        from clawmes.lib.chains import get_chain
+
+        chain = get_chain(chain_id)
+    except KeyError:
+        return None
+    url = chain.block_explorer_url or ""
+    return url if "blockscout" in url.lower() else None
+
+
+def _unsupported_chain_error(chain_id: int) -> ExplorerError:
+    """Build the error raised for chains this Etherscan-family client can't serve."""
+    blockscout = _blockscout_url(chain_id)
+    if blockscout:
+        return ExplorerError(
+            f"chain {chain_id} uses a Blockscout explorer ({blockscout}), which is "
+            "not Etherscan-API compatible — this service cannot serve it. Read "
+            "on-chain state through the RPC service instead, or open the explorer "
+            "page directly."
+        )
+    return ExplorerError(f"no explorer configured for chain {chain_id}")
+
+
 class ExplorerService(Service):
     id = "clawmes.explorer"
 
@@ -98,7 +129,7 @@ class ExplorerService(Service):
 
     def explorer_name(self, chain_id: int) -> str:
         if chain_id not in _EXPLORERS:
-            raise ExplorerError(f"no explorer configured for chain {chain_id}")
+            raise _unsupported_chain_error(chain_id)
         return _EXPLORERS[chain_id].name
 
     # --- public methods ---
@@ -189,7 +220,7 @@ class ExplorerService(Service):
 
     def _call(self, chain_id: int, **params) -> object:
         if chain_id not in _EXPLORERS:
-            raise ExplorerError(f"no explorer configured for chain {chain_id}")
+            raise _unsupported_chain_error(chain_id)
 
         cfg = _EXPLORERS[chain_id]
         api_key = os.environ.get(cfg.key_env)
