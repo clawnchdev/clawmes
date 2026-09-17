@@ -136,6 +136,19 @@ class TestErrorPaths:
         with pytest.raises(ExplorerError, match="no explorer configured"):
             svc.get_address_balance("0xabc", 999999)
 
+    def test_robinhood_chain_raises_blockscout_message(self, svc):
+        """RHC (4663/46630) uses Blockscout, not Etherscan — the error must
+        say so instead of pretending the chain is unknown, and must never
+        silently fall back to another chain's explorer API."""
+        with pytest.raises(ExplorerError, match="robinhoodchain.blockscout.com"):
+            svc.get_address_balance("0xabc", 4663)
+        with pytest.raises(ExplorerError, match="robinhoodchain-testnet.blockscout.com"):
+            svc.explorer_name(46630)
+
+    def test_robinhood_not_supported(self, svc):
+        assert svc.supports_chain(4663) is False
+        assert svc.supports_chain(46630) is False
+
     def test_non_dict_response(self, svc, fake_http):
         fake_http.responses.append("not a dict")
         with pytest.raises(ExplorerError, match="non-dict response"):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from clawmes.lib.ui_artifacts import (
+    bags_url,
     clanker_url,
     dexscreener_url,
     enrich_token_links,
@@ -103,6 +104,21 @@ class TestClankerUrl:
         assert clanker_url(_BAD, 8453) is None
 
 
+class TestBagsUrl:
+    def test_robinhood(self):
+        assert bags_url(_ADDR, 4663) == f"https://bags.fm/token/{_ADDR}"
+
+    def test_default_chain_is_robinhood(self):
+        assert bags_url(_ADDR) == f"https://bags.fm/token/{_ADDR}"
+
+    def test_non_robinhood_returns_none(self):
+        assert bags_url(_ADDR, 8453) is None
+        assert bags_url(_ADDR, 1) is None
+
+    def test_bad_addr_returns_none(self):
+        assert bags_url(_BAD, 4663) is None
+
+
 class TestEnrichTxLinks:
     def test_adds_explorer_url(self):
         details: dict = {"tx_hash": _TX}
@@ -137,6 +153,18 @@ class TestEnrichTokenLinks:
         enrich_token_links(details, token=_ADDR, chain_id=1)
         assert "clanker_url" not in details
         assert details["dexscreener_url"] == f"https://dexscreener.com/ethereum/{_ADDR}"
+
+    def test_robinhood_links(self):
+        # RHC launches link to Blockscout + bags.fm (Clanker doesn't exist
+        # there; DexScreener doesn't index the chain yet).
+        details: dict = {}
+        enrich_token_links(details, token=_ADDR, chain_id=4663)
+        assert details["token_explorer_url"] == (
+            f"https://robinhoodchain.blockscout.com/token/{_ADDR}"
+        )
+        assert details["bags_url"] == f"https://bags.fm/token/{_ADDR}"
+        assert "clanker_url" not in details
+        assert "dexscreener_url" not in details
 
     def test_include_clanker_false(self):
         details: dict = {}

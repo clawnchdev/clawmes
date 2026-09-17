@@ -50,6 +50,15 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         "arb1.arbitrum.io",
         "mainnet.optimism.io",
         "polygon-rpc.com",
+        # Robinhood Chain (Arbitrum Orbit L2) — official public RPCs, both
+        # mainnet (4663) and testnet (46630). These match the defaults in
+        # ``clawmes.services.rpc._DEFAULT_ENDPOINTS``: a default endpoint that
+        # isn't allowlisted here is a self-inflicted outage — every call is
+        # rejected by our own allowlist before it leaves the process.
+        # ``RpcService.blocked_default_endpoints()`` fails loudly if the two
+        # lists ever drift apart again.
+        "rpc.mainnet.chain.robinhood.com",
+        "rpc.testnet.chain.robinhood.com",
         # Price feeds + market data
         "api.coingecko.com",
         "api.dexscreener.com",
@@ -61,6 +70,14 @@ _DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
         "api.arbiscan.io",
         "api.optimistic.etherscan.io",
         "api.polygonscan.com",
+        # Robinhood Chain block explorer (Blockscout family). Used for the
+        # explorer links emitted on RHC launches; allowlisting it also keeps
+        # read-only Blockscout API calls unblocked if a surface adds them.
+        "robinhoodchain.blockscout.com",
+        "robinhoodchain-testnet.blockscout.com",
+        # Bags.fm — the Robinhood Chain launchpad + trade surface
+        # (token pages + the RHC token-metadata host clawn.ch builds on).
+        "bags.fm",
         # Lending / yield
         "aave-api-v3.aave.com",
         "api.lido.fi",

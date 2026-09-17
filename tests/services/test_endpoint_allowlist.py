@@ -143,6 +143,52 @@ class TestSingleton:
         assert a is b
 
 
+class TestBlockedHosts:
+    """The diagnostics surface used by the RPC startup self-check."""
+
+    def test_default_host_not_blocked(self):
+        svc = EndpointAllowlistService()
+        # A curated default (and the RHC hosts added with the 4663 chain).
+        assert svc.blocked_hosts(["api.coingecko.com"]) == []
+        assert svc.blocked_hosts(["rpc.mainnet.chain.robinhood.com"]) == []
+        assert svc.blocked_hosts(["robinhoodchain.blockscout.com"]) == []
+        assert svc.blocked_hosts(["bags.fm"]) == []
+
+    def test_unknown_host_blocked(self):
+        svc = EndpointAllowlistService()
+        assert svc.blocked_hosts(["not-allowlisted.example.com"]) == ["not-allowlisted.example.com"]
+
+    def test_user_added_host_not_blocked(self):
+        svc = EndpointAllowlistService()
+        svc.add_host("My-Private-RPC.Example.COM")
+        assert svc.blocked_hosts(["my-private-rpc.example.com"]) == []
+
+    def test_normalizes_case_and_ignores_blank(self):
+        svc = EndpointAllowlistService()
+        assert svc.blocked_hosts(["API.COINGECKO.COM", "", "  "]) == []
+
+    def test_mixed_list_preserves_only_blocked(self):
+        svc = EndpointAllowlistService()
+        blocked = svc.blocked_hosts(["api.coingecko.com", "evil.example.com"])
+        assert blocked == ["evil.example.com"]
+
+    def test_tolerates_broken_lib_http_import(self, monkeypatch):
+        """Diagnostics must never raise — a broken lib.http import just
+        means every checked host reports as blocked."""
+        import builtins
+
+        svc = EndpointAllowlistService()
+        real_import = builtins.__import__
+
+        def broken_import(name, *args, **kw):
+            if name == "clawmes.lib.http":
+                raise RuntimeError("lib.http broken")
+            return real_import(name, *args, **kw)
+
+        monkeypatch.setattr(builtins, "__import__", broken_import)
+        assert svc.blocked_hosts(["api.coingecko.com"]) == ["api.coingecko.com"]
+
+
 # --- lib/http integration -----------------------------------------------
 
 

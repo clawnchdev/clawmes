@@ -2,18 +2,32 @@
 
 LLM-callable surface for the Clawnch deploy flow. Wraps
 :class:`clawmes.services.clawnch.ClawnchService` which talks to the
-launchpad HTTP API. Two actions:
+launchpad HTTP API. Two surfaces, four actions:
 
-  * ``deploy`` — submit a deploy. Service handles the captcha
-    challenge (sign message + read storage slot + compute keccak
-    proof), then posts the solution. Clawnch's deployer wallet pays
-    gas + submits the underlying Clanker tx server-side. Requires
-    ``burn_tx_hash`` — every launch needs a verified 1,000,000+
-    $CLAWNCH burn (the launchpad rejects no-burn deploys with
-    ``burn_required``); the same burn sets the vault %. Optional
-    ``bypass_tx_hash`` skips the 24h cooldown by paying ETH to the
-    bypass recipient (see ``CLAWNCH_BYPASS_RECIPIENT``).
-  * ``info`` — read launch metadata for an existing token.
+Base (Clanker) — ``deploy`` submits a deploy through the custodial
+flow. The service handles the captcha challenge (sign message + read
+storage slot + compute keccak proof), then posts the solution.
+Clawnch's deployer wallet pays gas + submits the underlying Clanker
+tx server-side. Requires ``burn_tx_hash`` — every Base launch needs a
+verified 1,000,000+ $CLAWNCH burn (the launchpad rejects no-burn
+deploys with ``burn_required``). Optional ``bypass_tx_hash`` skips the
+24h cooldown by paying ETH to the bypass recipient.
+
+Robinhood Chain (Bags.fm launch router) — the Clanker path does not
+exist on RHC:
+
+  * ``rh_ticket`` — POST ``/api/robinhood/ticket``: the unsigned
+    ``launch()`` tx + EIP-712 ticket for the agent wallet to sign and
+    pay for.
+  * ``rh_confirm`` — POST ``/api/robinhood/launch`` ``mode="confirm"``:
+    record the broadcast ticket-path launch.
+  * ``rh_deposit`` — POST ``/api/robinhood/launch`` ``mode="deposit"``:
+    launch from a plain ETH deposit to the router's deposit address.
+  * ``rh_token`` — the RHC $CLAWNCH address + trade/explorer links.
+
+``info`` reads launch metadata. ``chain`` on ``deploy`` is Base-only:
+a robinhood request raises ``unsupported_chain`` with the RHC
+alternatives rather than deploying through the wrong backend.
 
 Metadata: ``image`` + per-platform social URLs (``twitter``,
 ``website``, ``telegram``, ``farcaster``, ``discord``) are passed
@@ -81,7 +95,7 @@ _SCHEMA: dict[str, Any] = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["deploy", "info"],
+            "enum": ["deploy", "info", "rh_ticket", "rh_confirm", "rh_deposit", "rh_token"],
         },
         "name": {"type": "string", "description": "Token name (deploy)."},
         "symbol": {"type": "string", "description": "Token symbol (deploy)."},
@@ -128,10 +142,47 @@ _SCHEMA: dict[str, Any] = {
             "description": (
                 "Tx hash of a verified 1,000,000+ $CLAWNCH burn from "
                 "the agent's wallet to the dead address within 24h. "
-                "Required for every deploy — the launchpad rejects "
-                "no-burn launches with code 'burn_required'. The same "
-                "burn sets the Clanker vault % (1M = 1%, 10M = 10%). "
-                "Use the /burn command to sign + submit one."
+                "Required for every Base deploy — the launchpad rejects "
+                "no-burn launches with code 'burn_required'. Not used "
+                "on Robinhood Chain (Bags does not burn)."
+            ),
+        },
+        "chain": {
+            "type": "string",
+            "description": (
+                "Launch surface for 'deploy'. Only 'base' (default, "
+                "Clanker) is served by that action; Robinhood Chain "
+                "launches use the rh_ticket / rh_deposit actions."
+            ),
+        },
+        "from_address": {
+            "type": "string",
+            "description": (
+                "The wallet that signs / pays for the launch (rh_ticket, "
+                "rh_confirm, rh_deposit). On the RHC actions this must be "
+                "the agent wallet registered with Clawnch."
+            ),
+        },
+        "fee_recipient": {
+            "type": "string",
+            "description": (
+                "Address receiving creator fees on RHC launches "
+                "(rh_ticket; optional, defaults to from_address)."
+            ),
+        },
+        "tx_hash": {
+            "type": "string",
+            "description": (
+                "Ticket-path launch tx hash to record (rh_confirm), sent "
+                "from the agent wallet to the launch router."
+            ),
+        },
+        "deposit_tx_hash": {
+            "type": "string",
+            "description": (
+                "Plain ETH transfer hash to the Clawnch RHC deposit "
+                "address (rh_deposit) — see meta.depositAddress from "
+                "rh_ticket."
             ),
         },
         "token": {
@@ -151,17 +202,17 @@ _SCHEMA: dict[str, Any] = {
     name="clawnch_launch",
     toolset="clawmes-defi",
     description=(
-        "Deploy a token via the Clawnch launchpad. Defaults to Base "
-        "(via Clanker); use --chain robinhood to launch on Robinhood "
-        "Chain via Bags.fm. Clawnch handles the deploy + initial "
-        "liquidity atomically; the user's wallet signs a captcha "
-        "challenge to prove identity (custodial) or signs the deploy tx "
-        "directly (non-custodial). Every deploy on Base requires a "
-        "verified 1,000,000+ $CLAWNCH burn (use /burn to submit one); "
-        "the Robinhood path currently doesn't enforce a burn. Supports "
-        "image + social metadata (twitter / website / telegram / "
-        "farcaster / discord). Requires CLAWNCH_API_KEY (register an "
-        "agent with /register_agent)."
+        "Deploy a token via the Clawnch launchpad. 'deploy' launches on "
+        "Base via Clanker (requires a verified 1,000,000+ $CLAWNCH burn; "
+        "use /burn to submit one) — it is Base-only. Robinhood Chain "
+        "launches use the Bags.fm router: 'rh_ticket' returns the unsigned "
+        "launch() tx + EIP-712 ticket the agent's wallet signs and pays "
+        "for, 'rh_confirm' records that tx, and 'rh_deposit' launches from "
+        "a plain ETH deposit to the router deposit address. 'rh_token' "
+        "returns the RHC $CLAWNCH address + links. 'info' reads launch "
+        "metadata. Supports image + social metadata (twitter / website / "
+        "telegram / farcaster / discord). The RHC actions need "
+        "CLAWNCH_API_KEY + a registered agent wallet (/register_agent)."
     ),
     schema=_SCHEMA,
     emoji="\U0001f31f",
@@ -171,6 +222,14 @@ def clawnch_launch(args: dict[str, Any], **kwargs: Any) -> str:
 
     if action == "info":
         return _handle_info(args)
+    if action == "rh_ticket":
+        return _handle_rh_ticket(args)
+    if action == "rh_confirm":
+        return _handle_rh_confirm(args)
+    if action == "rh_deposit":
+        return _handle_rh_deposit(args)
+    if action == "rh_token":
+        return _handle_rh_token(args)
     return _handle_deploy(args)
 
 
@@ -205,25 +264,28 @@ def _handle_deploy(args: dict[str, Any]) -> str:
     bypass = read_str(args, "bypass_tx_hash") or None
     burn = read_str(args, "burn_tx_hash") or None
 
-    # Classic non-custodial prepare path. The API routes chain based on a
-    # `chain` query param, which we pass through if the caller supplied it.
+    # `chain` selects the launch surface. Only Base is served by this
+    # action: Robinhood Chain runs through the launch-router actions
+    # (rh_ticket / rh_confirm / rh_deposit) and the service raises
+    # `unsupported_chain` for a robinhood request — we surface that
+    # rather than silently deploying on Base.
     start_deploy_chain = read_str(args, "chain") or None
 
     try:
-        if start_deploy_chain == "robinhood":
+        if start_deploy_chain and start_deploy_chain.strip().lower() not in ("base", "8453"):
             result = get_clawnch_service().prepare_deploy(
                 from_address=args.get("from_address") or "",
                 name=name,
                 symbol=symbol,
                 description=token_params.get("description"),
                 image=token_params.get("image"),
-                twitter=token_params.get("twitter"),
-                website=token_params.get("website"),
-                telegram=token_params.get("telegram"),
-                farcaster=token_params.get("farcaster"),
-                discord=token_params.get("discord"),
+                twitter=read_str(args, "twitter"),
+                website=read_str(args, "website"),
+                telegram=read_str(args, "telegram"),
+                farcaster=read_str(args, "farcaster"),
+                discord=read_str(args, "discord"),
                 burn_tx_hash=burn,
-                chain="robinhood",
+                chain=start_deploy_chain,
             )
         else:
             result = get_clawnch_service().deploy(
@@ -251,9 +313,9 @@ def _handle_deploy(args: dict[str, Any]) -> str:
 
     # Surface the actual chain from the launch response. The clawn.ch API
     # returns chainId in `data.chainId` (prepare path) or the deploy
-    # metadata; default to Base when absent so historical Base launches
-    # stay Base-tagged.
-    chain_id = int(result.get("chainId") or result.get("chain_id") or 8453)
+    # metadata; the Base custodial path echoes none, so only THAT path
+    # defaults to Base (a Robinhood request must never fall back to Base).
+    chain_id = _extract_chain_id(result)
 
     # Desktop UI: surface the tx explorer link + token links for the
     # brand-new token as clickable Link artifacts. Passive descriptive
@@ -279,6 +341,7 @@ def _handle_deploy(args: dict[str, Any]) -> str:
             rows.append(("Tx", tx_hash))
         links = [
             ("Clanker", result.get("clanker_url", "")),
+            ("Bags", result.get("bags_url", "")),
             ("DexScreener", result.get("dexscreener_url", "")),
             ("Explorer", result.get("explorer_url", "")),
         ]
@@ -293,6 +356,183 @@ def _handle_deploy(args: dict[str, Any]) -> str:
     if tx_hash:
         summary_parts.append(f"Tx: {tx_hash}")
     return json_result(result, summary=" ".join(summary_parts), preview=preview_path)
+
+
+def _extract_chain_id(result: dict[str, Any]) -> int:
+    """Best-effort chain id off a launch response; Base when truly absent.
+
+    The clawn.ch deploy responses echo a chain id on the non-custodial
+    path (``data.chainId``) and the RHC envelope (``data.chainId`` +
+    ``meta.chain``). Only the Base custodial response carries none — and
+    only then do we default to Base (8453) for link rendering.
+    """
+    data = result.get("data")
+    data = data if isinstance(data, dict) else {}
+    meta = result.get("meta")
+    meta = meta if isinstance(meta, dict) else {}
+    for candidate in (
+        result.get("chainId"),
+        result.get("chain_id"),
+        data.get("chainId"),
+        data.get("chain_id"),
+    ):
+        if candidate is not None:
+            try:
+                return int(candidate)
+            except (TypeError, ValueError):
+                continue
+    if str(meta.get("chain") or "").strip().lower() == "robinhood":
+        return 4663
+    return 8453
+
+
+def _handle_rh_ticket(args: dict[str, Any]) -> str:
+    """RHC ticket path: unsigned launch tx + EIP-712 ticket."""
+    from clawmes.services.clawnch import ClawnchError, get_clawnch_service
+
+    name = read_str(args, "name")
+    symbol = read_str(args, "symbol")
+    from_address = read_str(args, "from_address")
+    if not name or not symbol:
+        return error_result(
+            "rh_ticket requires 'name' and 'symbol'.",
+            code="param_error",
+        )
+    if not from_address:
+        return error_result(
+            "rh_ticket requires 'from_address' — the registered agent wallet "
+            "that will sign and pay for the launch.",
+            code="param_error",
+        )
+
+    try:
+        result = get_clawnch_service().rh_ticket(
+            agent_wallet=from_address,
+            name=name,
+            symbol=symbol,
+            description=read_str(args, "description") or None,
+            image=read_str(args, "image") or None,
+            fee_recipient=read_str(args, "fee_recipient") or None,
+        )
+    except ClawnchError as exc:
+        return error_result(exc.message, code=exc.code)
+    except Exception as exc:  # noqa: BLE001
+        return error_result(f"RHC ticket request failed: {exc}", code="api_error")
+
+    data = _as_dict(result.get("data"))
+    meta = _as_dict(result.get("meta"))
+    deposit_address = meta.get("depositAddress") or ""
+    creation_fee = meta.get("creationFeeWei") or data.get("value") or "0"
+    parts = [
+        f"Robinhood Chain launch ticket issued for {symbol}.",
+        "Sign and send the unsigned launch() tx from the agent wallet, "
+        "then record it with clawnch_launch action=rh_confirm tx_hash=<hash>.",
+    ]
+    if creation_fee not in ("", "0", "0x0"):
+        parts.append(f"Creation fee (wei): {creation_fee}.")
+    if deposit_address:
+        parts.append(
+            "Deposit path: send >= max(0.02 ETH, creation fee) to "
+            f"{deposit_address}, then call action=rh_deposit with "
+            "deposit_tx_hash=<hash>."
+        )
+    return json_result(result, summary=" ".join(parts))
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """Narrow an untyped JSON value to a dict (empty when it isn't one)."""
+    return value if isinstance(value, dict) else {}
+
+
+def _handle_rh_confirm(args: dict[str, Any]) -> str:
+    """RHC ticket path: record the broadcast launch tx."""
+    from clawmes.services.clawnch import (
+        ClawnchError,
+        get_clawnch_service,
+        rh_explorer_token_url,
+        rh_explorer_tx_url,
+        rh_trade_url,
+    )
+
+    tx_hash = read_str(args, "tx_hash")
+    if not tx_hash:
+        return error_result(
+            "rh_confirm requires 'tx_hash' (the launch tx sent from the agent wallet).",
+            code="param_error",
+        )
+    try:
+        result = get_clawnch_service().rh_confirm_launch(tx_hash=tx_hash)
+    except ClawnchError as exc:
+        return error_result(exc.message, code=exc.code)
+    except Exception as exc:  # noqa: BLE001
+        return error_result(f"RHC confirm failed: {exc}", code="api_error")
+
+    launch = _as_dict(result.get("launch"))
+    token = launch.get("token") or ""
+    tx_url = rh_explorer_tx_url(tx_hash)
+    if tx_url:
+        result["explorer_url"] = tx_url
+    if token:
+        result["token_explorer_url"] = rh_explorer_token_url(token)
+        result["trade_url"] = rh_trade_url(token)
+    summary = f"Recorded Robinhood Chain launch {token or tx_hash}."
+    return json_result(result, summary=summary)
+
+
+def _handle_rh_deposit(args: dict[str, Any]) -> str:
+    """RHC deposit path: launch from an already-sent ETH deposit."""
+    from clawmes.services.clawnch import (
+        ClawnchError,
+        get_clawnch_service,
+        rh_explorer_token_url,
+        rh_trade_url,
+    )
+
+    deposit_tx_hash = read_str(args, "deposit_tx_hash")
+    from_address = read_str(args, "from_address")
+    name = read_str(args, "name")
+    symbol = read_str(args, "symbol")
+    if not deposit_tx_hash or not from_address or not name or not symbol:
+        return error_result(
+            "rh_deposit requires 'deposit_tx_hash', 'from_address', 'name' and 'symbol'.",
+            code="param_error",
+        )
+    try:
+        result = get_clawnch_service().rh_deposit_launch(
+            deposit_tx_hash=deposit_tx_hash,
+            agent_wallet=from_address,
+            name=name,
+            symbol=symbol,
+            description=read_str(args, "description") or None,
+            image=read_str(args, "image") or None,
+        )
+    except ClawnchError as exc:
+        return error_result(exc.message, code=exc.code)
+    except Exception as exc:  # noqa: BLE001
+        return error_result(f"RHC deposit launch failed: {exc}", code="api_error")
+
+    launch = _as_dict(result.get("launch"))
+    token = launch.get("token") or ""
+    if token:
+        result["token_explorer_url"] = rh_explorer_token_url(token)
+        result["trade_url"] = rh_trade_url(token)
+    return json_result(
+        result,
+        summary=f"Launched {symbol} on Robinhood Chain via deposit.",
+    )
+
+
+def _handle_rh_token(args: dict[str, Any]) -> str:
+    """$CLAWNCH on Robinhood Chain: address + links."""
+    from clawmes.services.clawnch import get_clawnch_service
+
+    info = get_clawnch_service().rh_token_info()
+    return json_result(
+        info,
+        summary=(
+            f"$CLAWNCH on Robinhood Chain: {info['token_address']} (trade: {info.get('trade_url')})"
+        ),
+    )
 
 
 def _handle_info(args: dict[str, Any]) -> str:

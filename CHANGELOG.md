@@ -6,6 +6,60 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Fixed — Robinhood Chain was blocked by clawmes' own network allowlist
+
+The RHC RPC defaults shipped in `services/rpc.py` (4663 / 46630) were never
+added to `lib/http._DEFAULT_ALLOWLIST`, so every RHC call raised
+`NetworkAllowlistError` before leaving the process — the plugin blocked its own
+endpoints. Fixes:
+
+- `lib/http.py` — allowlist now carries the RHC hosts: both official RPCs
+  (`rpc.mainnet.chain.robinhood.com`, `rpc.testnet.chain.robinhood.com`), the
+  Blockscout explorers (mainnet + testnet) and the `bags.fm` trade surface.
+- `services/endpoint_allowlist.py` — new `blocked_hosts()` diagnostic: returns
+  the hosts no allowlist layer permits (defaults ∪ session set).
+- `services/rpc.py` — startup self-check (`blocked_default_endpoints()` /
+  `blocked_user_endpoints()`) so a shipped default that the allowlist blocks is
+  logged loudly at start instead of failing at first use. User-configured
+  overrides on non-allowlisted hosts now warn with the `/allow` remediation.
+
+### Added — Robinhood Chain launch surface in the Clawnch service
+
+`services/clawnch.py` now covers the RHC launch router (Bags.fm), not just the
+Base/Clanker HTTP flow:
+
+- `rh_ticket()` — `POST /api/robinhood/ticket`: unsigned `launch()` tx +
+  EIP-712 ticket bound to the registered agent wallet. Refuses to return a
+  ticket whose `chainId`/`meta.chain` isn't RHC.
+- `rh_confirm_launch()` / `rh_deposit_launch()` — `POST /api/robinhood/launch`
+  `mode="confirm"` (record a ticket-path launch) / `mode="deposit"` (launch
+  from a verified ETH deposit).
+- `rh_claimable()` / `rh_claim()` — `GET/POST /api/robinhood/claim`: claimable
+  fees + the unsigned `BagsFeeShare.claim(true)` tx. A 403 `not_claimer` is no
+  longer flattened into `no_credentials`.
+- `rh_launches()` — `GET /api/robinhood/launches`, rows decorated with
+  bags.fm + Blockscout links.
+- RHC-aware links (`rh_trade_url` / `rh_explorer_token_url` /
+  `rh_explorer_tx_url`), `lib/ui_artifacts.bags_url()` on chain 4663, and
+  `rh_token_info()` / `get_burn_config(chain="robinhood")` for the RHC $CLAWNCH
+  token (`0x6a50F139F3eD4C9c7bDa0D067c5Ed09De1EEBbeA` — no burn on this chain).
+
+### Changed — no silent wrong-chain fallbacks
+
+- `deploy(chain="robinhood")` and `prepare_deploy(chain="robinhood")` raise
+  `unsupported_chain` (the clawn.ch server routes `/api/prepare/deploy` by its
+  own env, ignoring the `chain` query param — a Robinhood request could have
+  come back as Base calldata). RHC launches must use the router actions.
+- `tools/clawnch_launch.py` — new `rh_ticket` / `rh_confirm` / `rh_deposit` /
+  `rh_token` actions; `chain` / `from_address` / `tx_hash` / `deposit_tx_hash`
+  are now declared in the schema (previously read by the handler but absent from
+  the schema); the launch chain id is read from `data.chainId`/`meta.chain`
+  instead of defaulting every response to Base.
+- `tools/clawnch_fees.py` — new `rh_launches` / `rh_claimable` / `rh_claim`
+  actions.
+- `services/explorer.py` — RHC (4663/46630) now fails with an explicit
+  Blockscout-is-not-Etherscan message instead of a generic unknown-chain error.
+
 ## 0.20.0 — 2026-07-06
 
 ### Added — EIP-7710 / EIP-7715 on-chain delegation

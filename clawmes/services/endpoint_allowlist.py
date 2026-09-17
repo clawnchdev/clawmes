@@ -28,6 +28,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from collections.abc import Iterable
 from typing import Any
 
 from clawmes.lib.logger import logger_for
@@ -96,6 +97,43 @@ class EndpointAllowlistService(Service):
             return False
         with self._lock:
             return normalized in self._user_hosts
+
+    # --- diagnostics ------------------------------------------------------
+
+    def blocked_hosts(self, hosts: Iterable[str]) -> list[str]:
+        """Return the hosts that *no* allowlist layer permits.
+
+        Consults the static defaults (``lib.http._DEFAULT_ALLOWLIST``)
+        plus this service's session-scoped user set — i.e. exactly the
+        two layers :func:`clawmes.lib.http._check_allowlist` checks
+        before rejecting a request. Empty/blank entries are ignored.
+
+        Built for startup self-checks: a *shipped default endpoint*
+        that our own allowlist blocks is a self-inflicted outage
+        (every call raises ``NetworkAllowlistError`` before leaving
+        the process). ``RpcService`` validates its defaults with this
+        at start so the two curated lists can't silently drift apart.
+        """
+        # Lazy import: lib.http imports this module lazily too, and we
+        # never want an import-time cycle between the two.
+        try:
+            from clawmes.lib.http import _DEFAULT_ALLOWLIST
+
+            defaults: frozenset[str] = frozenset(_DEFAULT_ALLOWLIST)
+        except Exception:  # noqa: BLE001 — diagnostics must never raise
+            defaults = frozenset()
+
+        blocked: list[str] = []
+        for host in hosts:
+            normalized = self._normalize(host, allow_empty=True)
+            if not normalized:
+                continue
+            if normalized in defaults:
+                continue
+            if self.is_allowed(normalized):
+                continue
+            blocked.append(normalized)
+        return blocked
 
     # --- audit -----------------------------------------------------------
 

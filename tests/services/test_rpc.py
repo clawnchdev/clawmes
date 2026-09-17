@@ -103,9 +103,9 @@ class TestStartStop:
         # emits a warning so the user sees the rate-limit caveat.
         import logging
 
-        from clawmes.services.rpc import RpcService
+        from clawmes.services.rpc import _DEFAULT_ENDPOINTS, RpcService
 
-        for cid in (1, 8453, 42161, 10, 137):
+        for cid in _DEFAULT_ENDPOINTS:
             monkeypatch.delenv(f"CLAWMES_RPC_{cid}", raising=False)
         records, handler, clawmes_root = self._capture_clawmes_logs(monkeypatch)
         try:
@@ -118,9 +118,9 @@ class TestStartStop:
     def test_start_no_warning_when_all_overridden(self, monkeypatch):
         import logging
 
-        from clawmes.services.rpc import RpcService
+        from clawmes.services.rpc import _DEFAULT_ENDPOINTS, RpcService
 
-        for cid in (1, 8453, 42161, 10, 137):
+        for cid in _DEFAULT_ENDPOINTS:
             monkeypatch.setenv(f"CLAWMES_RPC_{cid}", f"https://rpc-{cid}.example.com")
         records, handler, clawmes_root = self._capture_clawmes_logs(monkeypatch)
         try:
@@ -128,7 +128,64 @@ class TestStartStop:
         finally:
             clawmes_root.removeHandler(handler)
         msgs = [r.getMessage() for r in records if r.levelno == logging.WARNING]
+        # User overrides on non-allowlisted hosts DO warn (with the
+        # /allow remediation hint) — but never the public-default caveat.
         assert not any("public-node default" in m for m in msgs)
+
+    def test_no_default_endpoint_is_blocked_by_own_allowlist(self):
+        """Regression: RHC RPCs (4663/46630) were added to _DEFAULT_ENDPOINTS
+        without allowlisting their hosts, so every call raised
+        NetworkAllowlistError before leaving the process."""
+        from clawmes.services.rpc import RpcService
+
+        svc = RpcService()
+        svc.start()
+        assert svc.blocked_default_endpoints() == {}
+
+    def test_blocked_default_endpoints_detects_rogue_default(self, monkeypatch):
+        """The self-check must flag a shipped default whose host isn't
+        allowlisted (so the two curated lists can't drift silently)."""
+        from clawmes.services import rpc as rpc_mod
+        from clawmes.services.rpc import RpcService
+
+        monkeypatch.setitem(
+            rpc_mod._DEFAULT_ENDPOINTS, 999_999, "https://not-allowlisted.example.com/rpc"
+        )
+        svc = RpcService()
+        svc.start()
+        blocked = svc.blocked_default_endpoints()
+        assert 999_999 in blocked
+        assert blocked[999_999] == "https://not-allowlisted.example.com/rpc"
+        # 4663 must NOT appear — its host is allowlisted.
+        assert 4663 not in blocked
+
+    def test_blocked_user_endpoints_detects_non_allowlisted_override(self, monkeypatch):
+        from clawmes.services.rpc import RpcService
+
+        monkeypatch.setenv("CLAWMES_RPC_8453", "https://my-private-rpc.example.com")
+        svc = RpcService()
+        svc.start()
+        blocked = svc.blocked_user_endpoints()
+        assert 8453 in blocked
+        assert svc.blocked_default_endpoints() == {}
+
+    def test_blocked_endpoints_tolerate_service_import_failure(self, monkeypatch):
+        """The self-check is diagnostics — it must never raise."""
+        import builtins
+
+        from clawmes.services.rpc import RpcService
+
+        svc = RpcService()
+        svc.start()
+        real_import = builtins.__import__
+
+        def broken_import(name, *args, **kw):
+            if name == "clawmes.services.endpoint_allowlist":
+                raise RuntimeError("service module broken")
+            return real_import(name, *args, **kw)
+
+        monkeypatch.setattr(builtins, "__import__", broken_import)
+        assert svc.blocked_default_endpoints() == {}
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("CLAWMES_RPC_8453", "https://eth-mainnet.g.alchemy.com/custom")

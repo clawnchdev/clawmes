@@ -37,6 +37,16 @@ class TestRegistry:
     def test_is_supported_no(self):
         assert not is_supported(999999)
 
+    def test_robinhood_present(self):
+        chain = CHAINS[4663]
+        assert chain.short_name == "robinhood"
+        assert chain.block_explorer_url == "https://robinhoodchain.blockscout.com"
+        assert chain.is_l2
+        # Testnet companion.
+        testnet = CHAINS[46630]
+        assert testnet.short_name == "robinhood-testnet"
+        assert testnet.block_explorer_url == "https://robinhoodchain-testnet.blockscout.com"
+
 
 class TestGetChain:
     def test_by_id(self):
@@ -69,6 +79,10 @@ class TestGetChain:
     def test_whitespace_in_name(self):
         # Should strip whitespace
         assert get_chain("  base  ").chain_id == 8453
+
+    def test_robinhood_by_name(self):
+        assert get_chain("robinhood").chain_id == 4663
+        assert get_chain("Robinhood Chain").chain_id == 4663
 
 
 class TestChainDataclass:
