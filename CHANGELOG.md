@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.21.0 — 2026-09-17
+
+Robinhood Chain becomes the plugin's primary chain surface (chain 4663):
+agent-proof launches through the Clawnch RHC router (Bags.fm), fee claims and
+RHC-aware links — with every silent Base fallback replaced by a loud error.
+First PyPI release since 0.18.2; includes the 0.19.0 and 0.20.0 changes
+documented below.
+
+### Fixed — dependency pin: mcp>=1.0,<2
+
+The MCP 2.x SDK renamed the low-level tool API (`Tool.inputSchema`,
+`Server.list_tools`) that `clawmes/mcp_server/` targets. CI resolved the
+unbounded `mcp>=1.0` to 2.x and the MCP server tests failed. The dependency
+(dev extra and the production `[mcp]` extra) is now pinned to the 1.x line
+until the server is ported to 2.x.
+
 ### Fixed — Robinhood Chain was blocked by clawmes' own network allowlist
 
 The RHC RPC defaults shipped in `services/rpc.py` (4663 / 46630) were never
