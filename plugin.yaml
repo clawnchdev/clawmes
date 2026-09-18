@@ -4,6 +4,26 @@ description: Hermes Agent for crypto. Wallet, swaps, DeFi, launches, automation.
 author: Clawnch
 kind: standalone
 
+# Declared for `hermes plugins validate` / install hints; Hermes never
+# auto-installs these. Mirrors [project].dependencies in pyproject.toml
+# (plus eth-abi, which clawmes imports directly).
+python_dependencies:
+  - "web3>=7.0.0,<8"
+  - "eth-account>=0.13.0,<1"
+  - "eth-abi>=5.0.0,<6"
+  - "eth-utils>=4.0.0,<6"
+  - "mnemonic>=0.21,<1"
+  - "pycryptodome>=3.20.0,<4"
+  - "keyring>=25.0.0,<26"
+  - "pydantic>=2.7,<3"
+  - "httpx>=0.27,<1"
+  - "tenacity>=8.5,<10"
+  - "python-dotenv>=1.0,<2"
+  - "pyyaml>=6.0,<7"
+  - "rich>=13.7,<15"
+  - "typing_extensions>=4.12,<5"
+  - "qrcode>=8.0,<9"
+
 # Informational — the actual surface is registered programmatically in
 # register(ctx). This list is the source of truth for what users will see
 # in `hermes plugins list`, so it must match what register_all() actually
